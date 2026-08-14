@@ -137,7 +137,7 @@ Internamente, este subsistema está formado por los siguientes bloques principal
 
 El diagrama de segundo nivel del sistema se presenta a continuación:
 
-![Diagrama de segundo nivel](fig/Diagrama de segundo nivel.jpeg)
+![Diagrama de segundo nivel](fig/Diagrama%20de%20segundo%20nivel.jpeg)
 
 **Figura 3.1.** Diagrama de segundo nivel del sistema.
 
