@@ -14,25 +14,28 @@ Se presentan los diagramas correspondientes a los diferentes niveles de diseño,
 
 ## 2.1 Descripción general
 
-El diagrama de primer nivel representa el sistema completo como un único bloque.
+El diagrama de primer nivel representa el sistema de Whack-a-Mole completo como un único bloque. Su propósito es identificar las entradas y salidas externas necesarias para el funcionamiento del juego, sin mostrar todavía la estructura interna ni los módulos utilizados para cada función. 
 
-Su objetivo es identificar las entradas y salidas externas del sistema sin mostrar todavía su estructura interna.
+El sistema recibe como entradas los ocho pulsadores externos utilizados por el jugador, la señal de reinicio manual y el reloj de 100 MHz. A partir de estas entradas, el sistema controla el desarrollo de la partida y genera las señales necesarias para indicar la posición activa del topo y mostrar los resultados obtenidos por el jugador.
 
+Durante cada turno se selecciona una de ocho posiciones posibles, la cual se indica mediante uno de los ocho LEDs disponibles. El jugador debe presionar el pulsador correspondiente a la posición activa dentro del tiempo permitido. El sistema determina si la acción corresponde a un acierto o un fallo y actualiza los resultados de la partida.
+
+Los aciertos y los fallos acumulados se muestran mediante cuatro displays de 7 segmentos.
 ## 2.2 Entradas
 
 | Señal | Descripción |
 |---|---|
-| `________` | ______________________________ |
-| `________` | ______________________________ |
-| `________` | ______________________________ |
+| `Reloj de 100 MHz` | `Señal de reloj principal utilizada por el subsistema implementado en la FPGA` |
+| `Ocho pulsadores` | `Permiten al jugador seleccionar una de las ocho posiciones del topo` |
+| `Señal de reinicio` | `Permite reiniciar manualmente el juego y restablecer las condiciones iniciales` |
 
 ## 2.3 Salidas
 
 | Señal | Descripción |
 |---|---|
-| `________` | ______________________________ |
-| `________` | ______________________________ |
-| `________` | ______________________________ |
+| `Ocho LEDs de posición` | `Indican visualmente cuál de las ocho posiciones corresponde al topo activo` |
+| `Cuatro displays de 7 segmentos` | `Muestran la cantidad acumulada de aciertos y fallos` |
+
 
 ## 2.4 Diagrama
 
@@ -40,7 +43,9 @@ Su objetivo es identificar las entradas y salidas externas del sistema sin mostr
 
 ## 2.5 Descripción del funcionamiento
 
-Describir brevemente el funcionamiento general del sistema y la relación entre sus entradas y salidas.
+El sistema inicia la partida bajo las condiciones iniciales establecidas y selecciona una posición del topo. Mientras dicha posición permanece activa, el jugador puede responder mediante uno de los ocho pulsadores externos. El sistema evalúa la respuesta, actualiza los contadores y continua con un nuevo turno mientras no se alcance la condición de finalización del juego.
+
+El reloj de 100 MHz proporciona la referencia temporal principal para las funciones implementadas en la FPGA.
 
 ---
 
@@ -48,49 +53,56 @@ Describir brevemente el funcionamiento general del sistema y la relación entre 
 
 ## 3.1 Descripción general
 
-El diagrama de segundo nivel divide el sistema completo en sus principales subsistemas.
+El diagrama de segundo nivel divide el sistema completo en dos subsistemas principales: el subsistema discreto y el subsistema FPGA. Ambos trabajan de forma conjunta para realizar las diferentes funciones necesarias durante el desarrollo del juego.
 
-En este nivel se identifican las diferentes partes funcionales del proyecto y las señales utilizadas para la comunicación entre ellas.
+El subsistema discreto se encarga principalmente de generar la posición pseudoaleatoria del topo, indicar dicha posición mediante uno de los ocho LEDs y preparar la información necesaria para transmitirla hacia la FPGA mediante comunicación UART. El subsistema FPGA funciona como el controlador principal del juego, encargándose de recibir la posición generada, procesar las acciones del jugador, controlar la duración de los turnos, manejar la dificultad y actualizar los resultados mostrados en los displays.
+
+La comunicación entre ambos subsistemas se realiza en dos direcciones. La FPGA envía una señal de solicitud de topo al subsistema discreto para indicar cuando debe generarse una nueva posición. Y el subsistema discreto transmite la posición generada hacia la FPGA mediante el enlace serial UART.
 
 ## 3.2 Subsistemas principales
 
-### 3.2.1 Subsistema __________________
+### 3.2.1 Subsistema discreto
 
 **Función:**
 
-Describir la función principal del subsistema.
+Generar una nueva posición pseudoaleatoria cada vez que la FPGA lo solicite, indicar visualmente la posición seleccionada mediante uno de los ocho LEDs y transmitir la información correspondiente hacia la FPGA mediante comunicación serial.
 
 **Entradas:**
 
 | Señal | Descripción |
 |---|---|
-| `________` | ______________________________ |
+| `Solicitud del topo` | `Señal proveniente de la FPGA que indica cuando debe generarse una nueva posición para el siguiente turno.` |
 
 **Salidas:**
 
 | Señal | Descripción |
 |---|---|
-| `________` | ______________________________ |
+| `UART TX` | `Señal serial que contiene la posición generada y se transmite hacia la FPGA mediante UART` |
+| `LED[7:0]` | `Ocho señales utilizadas para indicar visualmente cuál de las posiciones del topo se encuentra activa` |
 
 ---
 
-### 3.2.2 Subsistema __________________
+### 3.2.2 Subsistema FPGA
 
 **Función:**
 
-Describir la función principal del subsistema.
+Controlar el funcionamiento general del juego, recibiendo la posición generada por el subsistema discreto, procesando las acciones realizadas por el jugador y administrando los tiempos, dificultad, aciertos, fallos y visualizació de resultados.
 
 **Entradas:**
 
 | Señal | Descripción |
 |---|---|
-| `________` | ______________________________ |
+| `UART RX` | `Señal serial proveniente del subsistema discreto que contiene la posición del topo` |
+| `Botones[7:0]` | `Ocho pulsadores externos utilizados por el jugador para seleccionar la posición que desea golpear` |
+| `CLK_100MHz` | `Reloj principal de 100 MHz utilizado por la lógica implementada en la FPGA` |
+| `Reset` | `Señal utilizada para reiniciar el juego y regresar el sistema a sus condiciones iniciales` |
 
 **Salidas:**
 
 | Señal | Descripción |
 |---|---|
-| `________` | ______________________________ |
+| `Solicitud del topo` | `Señal enviada hacia el subsistema discreto para solicitar la generación de una nueva posición` |
+| `aciertos/fallos` | `Señales utilizadas para controlar los cuatro displays de 7 segmentos y mostrar los aciertos y fallos acumulados` |
 
 ## 3.3 Diagrama
 
@@ -98,7 +110,13 @@ Describir la función principal del subsistema.
 
 ## 3.4 Comunicación entre subsistemas
 
-Describir las principales señales utilizadas para comunicar los subsistemas y explicar brevemente la información transportada por cada una.
+La comunicación entre subsistemas se realiza mediante dos señales principales. Debido a que ambos subsistemas operan con referencias temporales independientes, no se comparte ninguna señal de reloj entre ellos.
+
+La señal solicitud del topo permite que la FPGA controle cuando debe generarse una nueva posición. Al recibir esta señal, el subsistema discreto actualiza el valor pseudoaleatorio y prepara la posición obtenida para su transmisión.
+
+Posteriormente, la posición se envía mediante la línea UART desde la salida UART TX hacia la entrada UART RX. La transmisión utiliza una trama 8N1, donde los tres bits menos significativos del byte representan una de las ocho posibles posiciones del topo.
+
+De esta manera, la FPGA determina cuando iniciar un nuevo turno, mientras que el subsistema discreto es el encargado de generar y devolver la nueva posición correspondiente.
 
 ---
 
