@@ -130,6 +130,8 @@ Para el presente proyecto, el subsistema implementado en la FPGA se divide en bl
 
 ## 4.2 Subsistema Discreto
 
+![Diagrama de tercer nivel del subsistema discreto](fig/IMG_5090_tercernivel_discreto.jpeg)
+
 #### 4.2.1 Bloque Oscilador Astable 555
 **Función:** Generar una señal de reloj continua y autónoma que sirve como base de tiempos para todo el subsistema discreto.
 
