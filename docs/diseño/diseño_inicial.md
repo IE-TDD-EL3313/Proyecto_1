@@ -128,55 +128,158 @@ En el tercer nivel se realiza la descomposición interna de los subsistemas defi
 
 Cada subsistema se divide en bloques funcionales responsables de realizar tareas específicas dentro del sistema.
 
-## 4.2 Subsistema __________________
+## 4.2 Subsistema Discreto
 
-### 4.2.1 Bloque __________________
+#### 4.2 Subsistema Discreto
 
-**Función:**
-
-Describir la función realizada por el bloque.
-
-**Entradas:**
-
-| Señal | Descripción |
-|---|---|
-| `________` | ______________________________ |
-
-**Salidas:**
-
-| Señal | Descripción |
-|---|---|
-| `________` | ______________________________ |
-
----
-
-### 4.2.2 Bloque __________________
-
-**Función:**
-
-Describir la función realizada por el bloque.
+#### 4.2.1 Bloque Oscilador Astable 555
+**Función:** Generar una señal de reloj continua y autónoma que sirve como base de tiempos para todo el subsistema discreto.
 
 **Entradas:**
-
 | Señal | Descripción |
-|---|---|
-| `________` | ______________________________ |
+| :--- | :--- |
+| `VCC` / `GND` | Alimentación del circuito (implícita). |
 
 **Salidas:**
-
 | Señal | Descripción |
-|---|---|
-| `________` | ______________________________ |
+| :--- | :--- |
+| `reloj_alta_frec` | Señal de reloj base generada por el oscilador. |
 
-## 4.3 Diagrama
+#### 4.2.2 Bloque Divisor de Frecuencia
+**Función:** Reducir la frecuencia de la señal base para obtener los relojes de operación requeridos por la lógica síncrona y la transmisión serial.
 
-![Diagrama de tercer nivel](ruta_imagen)
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `reloj_alta_frec` | Señal de reloj rápida proveniente del oscilador. |
 
-## 4.4 Descripción del funcionamiento
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Reloj_baud` | Reloj ajustado a la tasa de baudios para la transmisión UART. |
+| `Clk_local` | Reloj de trabajo para los componentes síncronos del subsistema discreto. |
 
-Describir cómo interactúan los diferentes bloques internos y cómo las señales permiten realizar la función correspondiente al subsistema.
+#### 4.2.3 Bloque Sincronizador de 2 etapas
+**Función:** Mitigar la metastabilidad de la señal de solicitud asíncrona proveniente de la FPGA al ingresarla al dominio de reloj local.
 
----
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Solicitud_topo` | Señal externa de petición generada por la FPGA (GPIO). |
+| `Clk_local` | Reloj local del subsistema discreto. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `solicitud_sync` | Señal de solicitud alineada de forma segura con el reloj local. |
+
+#### 4.2.4 Bloque Detector de Flanco de subida
+**Función:** Convertir la señal de solicitud sincronizada en un único pulso de un ciclo de reloj para activar las cargas y avances del sistema sin generar repeticiones erróneas.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `solicitud_sync` | Señal de petición sincronizada. |
+| `Clk_local` | Reloj local del subsistema discreto. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Pulso_avance (carga)` | Pulso de control de un ciclo de duración que acciona el LFSR y la UART. |
+
+#### 4.2.5 Bloque Registro LFSR
+**Función:** Generar el estado pseudoaleatorio que determina la secuencia de aparición de los topos.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Pulso_avance (carga)` | Pulso que ordena avanzar al siguiente estado pseudoaleatorio. |
+| `Clk_local` | Reloj local del subsistema discreto. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Estado_LFSR [3:0]` | Bus de 4 bits con el estado pseudoaleatorio actual del registro. |
+
+#### 4.2.6 Bloque Extractor de Posición
+**Función:** Adaptar y recortar el estado completo del LFSR a los bits estrictamente necesarios para representar las 8 posiciones posibles del juego.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Estado_LFSR [3:0]` | Estado actual del LFSR de 4 bits. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Posición_topo [2:0]` | Bus de 3 bits con la posición activa válida para el decodificador y la UART. |
+
+#### 4.2.7 Bloque Registro Trama (START+Datos+Stop)
+**Función:** Empaquetar estáticamente los 3 bits de posición junto con los bits fijos de inicio (START), parada (STOP) y relleno para formar la estructura de una trama UART de 10 bits.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Posición_topo [2:0]` | Bits con la información de la posición activa. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Trama_Paralelo [9:0]` | Bus de 10 bits con la trama completa armada en paralelo. |
+
+#### 4.2.8 Bloque Contador de bits
+**Función:** Llevar el registro de cuántos bits han sido transmitidos para habilitar o deshabilitar el desplazamiento del registro serializador.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Pulso_avance (carga)` | Señal que reinicia el contador al iniciar una nueva transmisión. |
+| `Reloj_baud` | Reloj de la tasa de transmisión. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Cuenta_bits [3:0]` | Estado actual del conteo de bits transmitidos. |
+| `Habilita_shift` | Señal de control que permite el desplazamiento en el registro serial. |
+
+#### 4.2.9 Bloque Registro Paralelo-Serie
+**Función:** Recibir la trama armada en paralelo y desplazarla bit a bit de manera serial hacia la FPGA a la velocidad dictada por el reloj de baudios.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Trama_Paralelo [9:0]` | La trama de 10 bits lista para enviar. |
+| `Pulso_avance (carga)` | Pulso que indica cargar la trama en los registros. |
+| `Reloj_baud` | Reloj que dicta el ritmo de desplazamiento de los datos. |
+| `Habilita_shift` | Permiso del contador para realizar el desplazamiento. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Tx_serial` | Línea de datos serie que viaja hacia el subsistema FPGA. |
+
+#### 4.2.10 Bloque Decodificador 3->8
+**Función:** Traducir los 3 bits de posición en una única línea activa para encender físicamente el LED correspondiente al topo en el protoboard.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Posición_topo [2:0]` | Bus con la posición activa del topo. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `LEDs_topo [7:0]` | Bus de 8 líneas donde solo una está activa para encender el LED físico. |
+
+### 4.3 Diagrama
+![Diagrama de tercer nivel Subsistema Discreto]()
+
+### 4.4 Descripción del funcionamiento
+El sistema opera basándose en la temporización local generada por el `Oscilador Astable 555`, cuya señal de alta frecuencia es procesada por el `Divisor de Frecuencia` para proveer los relojes de operación (`Clk_local` y `Reloj_baud`). Cuando la FPGA envía la petición mediante `Solicitud_topo`, esta señal entra al `Sincronizador de 2 etapas` para ingresar de manera segura al dominio de reloj discreto, mitigando riesgos de metastabilidad. A continuación, el `Detector de Flanco de subida` transforma esa petición sincronizada en un pulso único y preciso (`Pulso_avance`).
+
+Este `Pulso_avance` desencadena dos acciones simultáneas críticas. Por un lado, ordena al `Registro LFSR` avanzar a un nuevo estado pseudoaleatorio, del cual el `Extractor de Posición` toma los 3 bits relevantes (`Posición_topo [2:0]`). Estos 3 bits se envían inmediatamente al `Decodificador 3->8` para encender el respectivo LED físico (`LEDs_topo [7:0]`). 
+
+Por otro lado, la nueva posición es empaquetada por el `Registro Trama` en formato UART. El mismo `Pulso_avance` le indica al `Registro Paralelo-Serie` que cargue la `Trama_Paralelo [9:0]` y arranca el `Contador de bits`. Mientras el contador mantiene en alto la señal `Habilita_shift`, el registro desplaza un bit a la vez con cada ciclo del `Reloj_baud`, logrando transmitir de manera asíncrona la señal `Tx_serial` hacia el sincronizador de la FPGA.
 
 # 5. Diagrama de cuarto nivel
 
