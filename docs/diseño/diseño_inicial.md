@@ -39,7 +39,7 @@ Los aciertos y los fallos acumulados se muestran mediante cuatro displays de 7 s
 
 ## 2.4 Diagrama
 
-![Diagrama de primer nivel](ruta_imagen)
+![Diagrama de primer nivel](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/dise%C3%B1o/fig/Diagrama%20de%20Primer%20Nivel.jpeg)
 
 ## 2.5 Descripción del funcionamiento
 
