@@ -124,13 +124,11 @@ De esta manera, la FPGA determina cuando iniciar un nuevo turno, mientras que el
 
 ## 4.1 Descripción general
 
-En el tercer nivel se realiza la descomposición interna de los subsistemas definidos en el segundo nivel.
+En el tercer nivel de diseño se realiza la descomposición interna de los subsistemas definidos en el diagrama de segundo nivel. El objetivo de este nivel es identificar los bloques funcionales principales necesarios para implementar el comportamiento del sistema y establecer las señales mediante las cuales estos bloques se comunican.
 
-Cada subsistema se divide en bloques funcionales responsables de realizar tareas específicas dentro del sistema.
+Para el presente proyecto, el subsistema implementado en la FPGA se divide en bloques encargados de la recepción de la posición del topo, acondicionamiento de los pulsadores, evaluación del golpe, temporización del turno, control de dificultad, conteo de resultados, visualización y control general de la secuencia del juego.
 
 ## 4.2 Subsistema Discreto
-
-#### 4.2 Subsistema Discreto
 
 #### 4.2.1 Bloque Oscilador Astable 555
 **Función:** Generar una señal de reloj continua y autónoma que sirve como base de tiempos para todo el subsistema discreto.
@@ -271,15 +269,276 @@ Cada subsistema se divide en bloques funcionales responsables de realizar tareas
 | :--- | :--- |
 | `LEDs_topo [7:0]` | Bus de 8 líneas donde solo una está activa para encender el LED físico. |
 
-### 4.3 Diagrama
-![Diagrama de tercer nivel Subsistema Discreto]()
 
-### 4.4 Descripción del funcionamiento
-El sistema opera basándose en la temporización local generada por el `Oscilador Astable 555`, cuya señal de alta frecuencia es procesada por el `Divisor de Frecuencia` para proveer los relojes de operación (`Clk_local` y `Reloj_baud`). Cuando la FPGA envía la petición mediante `Solicitud_topo`, esta señal entra al `Sincronizador de 2 etapas` para ingresar de manera segura al dominio de reloj discreto, mitigando riesgos de metastabilidad. A continuación, el `Detector de Flanco de subida` transforma esa petición sincronizada en un pulso único y preciso (`Pulso_avance`).
 
-Este `Pulso_avance` desencadena dos acciones simultáneas críticas. Por un lado, ordena al `Registro LFSR` avanzar a un nuevo estado pseudoaleatorio, del cual el `Extractor de Posición` toma los 3 bits relevantes (`Posición_topo [2:0]`). Estos 3 bits se envían inmediatamente al `Decodificador 3->8` para encender el respectivo LED físico (`LEDs_topo [7:0]`). 
 
-Por otro lado, la nueva posición es empaquetada por el `Registro Trama` en formato UART. El mismo `Pulso_avance` le indica al `Registro Paralelo-Serie` que cargue la `Trama_Paralelo [9:0]` y arranca el `Contador de bits`. Mientras el contador mantiene en alto la señal `Habilita_shift`, el registro desplaza un bit a la vez con cada ciclo del `Reloj_baud`, logrando transmitir de manera asíncrona la señal `Tx_serial` hacia el sincronizador de la FPGA.
+
+
+## 4.3 Subsistema de la FPGA
+
+El subsistema FPGA constituye la unidad de control principal del juego. Su función es recibir la posición generada por el subsistema discreto, procesar las entradas provenientes de los pulsadores, determinar si la acción del jugador corresponde a un acierto o un fallo, controlar la duración de los turnos, actualizar los contadores y coordinar el desarrollo completo de la partida.
+
+El diagrama de tercer nivel del subsistema FPGA se muestra a continuación:
+
+![Diagrama de tercer nivel del subsistema FPGA](fig/Screenshot_20260813-232900-display-0.png.png)
+
+**Figura 4.1.** Diagrama de tercer nivel del subsistema FPGA.
+
+Los bloques funcionales que conforman este subsistema se describen en las siguientes secciones.
+
+---
+
+### 4.3.1 Receptor UART
+
+**Función:**
+
+El receptor UART se encarga de recibir la información serial enviada desde el subsistema discreto y recuperar la posición del topo.
+
+La comunicación utiliza una trama UART. El receptor procesa los bits recibidos y obtiene el byte de datos correspondiente. De este byte se utilizan los tres bits menos significativos para representar la posición del topo, permitiendo codificar las ocho posiciones posibles mediante valores entre `000` y `111`.
+
+Además de entregar la posición recibida, el bloque genera una señal `DATO_VALIDO` para indicar al resto del sistema que se ha recibido correctamente una nueva posición y que esta se encuentra disponible para ser utilizada.
+
+**Entradas:**
+
+| Señal | Descripción |
+|---|---|
+| `SERIAL_SYNC` | Señal serial proveniente del subsistema discreto, previamente sincronizada con el dominio de reloj de la FPGA. |
+| `CLK_100MHz` | Reloj principal utilizado para sincronizar el funcionamiento del receptor. |
+| `RESET` | Reinicia el receptor UART y lo devuelve a su condición inicial. |
+
+**Salidas:**
+
+| Señal | Descripción |
+|---|---|
+| `POSICION_TOPO[2:0]` | Posición recibida del topo, codificada mediante 3 bits para representar una de las ocho posiciones posibles. |
+| `DATO_VALIDO` | Pulso que indica que una nueva posición fue recibida correctamente y se encuentra disponible. |
+
+**Diseño del bloque:**
+
+El receptor se diseñó de manera modular. Internamente se consideran funciones de control de la recepción UART, almacenamiento de los ocho bits recibidos y almacenamiento de la posición final. Esta estructura será desarrollada con mayor detalle en el diagrama de cuarto nivel.
+
+---
+
+### 4.3.2 Sincronización y antirrebote
+
+**Función:**
+
+Este bloque acondiciona las señales provenientes de los ocho pulsadores utilizados por el jugador.
+
+Los pulsadores constituyen señales externas y asíncronas respecto al reloj de la FPGA. Por esta razón, primero deben sincronizarse con `CLK_100MHz`. Adicionalmente, debido al comportamiento mecánico de los pulsadores, una única pulsación puede producir varias transiciones eléctricas en un intervalo corto de tiempo. El circuito de antirrebote evita que estas transiciones sean interpretadas como múltiples golpes.
+
+Como resultado, el bloque entrega señales limpias y sincronizadas que representan una única pulsación válida por cada acción física realizada por el jugador.
+
+**Entradas:**
+
+| Señal | Descripción |
+|---|---|
+| `GOLPE[7:0]` | Señales provenientes de los ocho pulsadores físicos. |
+| `CLK_100MHz` | Reloj principal utilizado para sincronizar y procesar las entradas. |
+| `RESET` | Reinicia los elementos internos de sincronización y antirrebote. |
+
+**Salidas:**
+
+| Señal | Descripción |
+|---|---|
+| `GOLPE_LIMPIO[7:0]` | Señales acondicionadas de los ocho pulsadores, sincronizadas y libres de rebote. |
+
+**Diseño del bloque:**
+
+El acondicionamiento se realiza mediante una etapa de sincronización seguida por una etapa de antirrebote y detección de pulsación. De esta manera, los demás bloques trabajan únicamente con eventos digitales confiables.
+
+---
+
+### 4.3.3 Evaluador de golpe
+
+**Función:**
+
+El evaluador de golpe determina si el pulsador presionado por el jugador corresponde a la posición actual del topo.
+
+Para realizar esta función, el bloque recibe `POSICION_TOPO[2:0]`, las señales acondicionadas de los pulsadores y la indicación de que la ventana temporal del turno se encuentra activa.
+
+Si el jugador presiona el pulsador correspondiente a la posición del topo dentro del tiempo permitido, se genera un `ACIERTO`. Si se presiona una posición incorrecta durante la ventana válida, se genera un `FALLO`.
+
+**Entradas:**
+
+| Señal | Descripción |
+|---|---|
+| `POSICION_TOPO[2:0]` | Posición actual del topo recibida mediante UART. |
+| `GOLPE_LIMPIO[7:0]` | Señales acondicionadas provenientes de los ocho pulsadores. |
+| `VENTANA_ACTIVA` | Indica que el turno se encuentra dentro del tiempo permitido para responder. |
+
+**Salidas:**
+
+| Señal | Descripción |
+|---|---|
+| `ACIERTO` | Pulso generado cuando el jugador presiona el pulsador correcto dentro de la ventana temporal. |
+| `FALLO` | Pulso generado cuando el jugador presiona un pulsador incorrecto dentro de la ventana temporal. |
+
+**Diseño del bloque:**
+
+El bloque realiza una comparación entre la posición codificada del topo y el pulsador activado. La evaluación solamente se considera válida mientras `VENTANA_ACTIVA` se encuentre activa.
+
+---
+
+### 4.3.4 Temporizador del turno
+
+**Función:**
+
+El temporizador del turno controla el intervalo durante el cual el jugador puede responder después de que se presenta una nueva posición del topo.
+
+Al recibir `INICIAR_TURNO`, el temporizador comienza un nuevo conteo. Mientras el tiempo transcurrido sea menor que `DURACION_TURNO`, mantiene activa la señal `VENTANA_ACTIVA`.
+
+Si el jugador no realiza una acción válida antes de que finalice este intervalo, el bloque genera `TIEMPO_AGOTADO`, condición que posteriormente es procesada por el controlador principal como un fallo del turno.
+
+**Entradas:**
+
+| Señal | Descripción |
+|---|---|
+| `CLK_100MHz` | Reloj principal del sistema. |
+| `INICIAR_TURNO` | Orden proveniente de la FSM principal para iniciar una nueva ventana temporal. |
+| `DURACION_TURNO` | Valor que determina la duración actual de la ventana del turno. |
+
+**Salidas:**
+
+| Señal | Descripción |
+|---|---|
+| `VENTANA_ACTIVA` | Indica que el jugador todavía se encuentra dentro del tiempo permitido para responder. |
+| `TIEMPO_AGOTADO` | Pulso generado cuando se alcanza la duración máxima del turno sin una respuesta válida. |
+
+**Diseño del bloque:**
+
+El temporizador utiliza el reloj principal junto con una habilitación temporal o *clock enable*. De esta forma se obtiene una base de tiempo apropiada sin generar un reloj independiente. Un contador mide el tiempo transcurrido y un comparador determina cuándo se alcanza `DURACION_TURNO`.
+
+---
+
+### 4.3.5 Control de dificultad
+
+**Función:**
+
+El control de dificultad modifica progresivamente la duración disponible para responder conforme el jugador obtiene aciertos.
+
+Al iniciar una nueva partida, la duración del turno se establece en `1,5 s`. Cada vez que se registra un acierto, esta duración se reduce en `100 ms`. La reducción continúa hasta alcanzar un valor mínimo de `500 ms`.
+
+Los fallos no aumentan nuevamente la duración del turno.
+
+**Entradas:**
+
+| Señal | Descripción |
+|---|---|
+| `REGISTRAR_ACIERTO` | Indica que debe procesarse un nuevo acierto y reducirse la duración cuando corresponda. |
+| `RESET_PARTIDA` | Restablece la duración inicial de `1,5 s`. |
+| `CLK_100MHz` | Reloj utilizado para actualizar el registro de duración. |
+
+**Salidas:**
+
+| Señal | Descripción |
+|---|---|
+| `DURACION_TURNO` | Duración actual de la ventana temporal utilizada por el temporizador del turno. |
+
+**Diseño del bloque:**
+
+El bloque mantiene un registro con la duración actual. Ante cada acierto se comprueba si la duración puede reducirse y, en caso afirmativo, se restan `100 ms`. La duración se limita inferiormente a `500 ms`.
+
+---
+
+### 4.3.6 Contador de aciertos
+
+**Función:**
+
+Este bloque almacena la cantidad total de aciertos obtenidos durante la partida.
+
+El contador se incrementa cada vez que la FSM principal genera `REGISTRAR_ACIERTO`. El resultado se limita al intervalo entre `0` y `99`, debido a que posteriormente se representa utilizando dos dígitos de los displays de 7 segmentos.
+
+**Entradas:**
+
+| Señal | Descripción |
+|---|---|
+| `REGISTRAR_ACIERTO` | Orden de incremento del contador. |
+| `RESET_PARTIDA` | Reinicia el contador a cero al comenzar una nueva partida. |
+| `CLK_100MHz` | Reloj principal utilizado para actualizar el contador. |
+
+**Salidas:**
+
+| Señal | Descripción |
+|---|---|
+| `ACIERTOS[6:0]` | Cantidad acumulada de aciertos, representada en binario entre 0 y 99. |
+
+---
+
+### 4.3.7 Contador de fallos acumulados
+
+**Función:**
+
+Este bloque lleva el conteo total de fallos ocurridos durante una partida.
+
+El contador se incrementa cuando la FSM principal genera `REGISTRAR_FALLO`. Este evento puede producirse debido a una pulsación incorrecta o porque se agotó el tiempo disponible sin realizar una respuesta válida.
+
+El valor acumulado se conserva aunque posteriormente ocurra un acierto y solamente se reinicia cuando comienza una nueva partida.
+
+**Entradas:**
+
+| Señal | Descripción |
+|---|---|
+| `REGISTRAR_FALLO` | Orden para incrementar el número total de fallos. |
+| `RESET_PARTIDA` | Reinicia el contador a cero. |
+| `CLK_100MHz` | Reloj utilizado para actualizar el contador. |
+
+**Salidas:**
+
+| Señal | Descripción |
+|---|---|
+| `FALLOS[6:0]` | Número acumulado de fallos de la partida, limitado al intervalo de 0 a 99. |
+
+---
+
+### 4.3.8 Contador de fallos consecutivos
+
+**Función:**
+
+Este bloque determina cuántos fallos consecutivos ha cometido el jugador.
+
+A diferencia del contador de fallos acumulados, este contador vuelve a cero cuando se registra un acierto. Cuando se alcanzan tres fallos consecutivos, se genera la señal `FIN_3_FALLOS`, utilizada por la FSM principal para finalizar la partida.
+
+**Entradas:**
+
+| Señal | Descripción |
+|---|---|
+| `REGISTRAR_FALLO` | Incrementa el número de fallos consecutivos. |
+| `REGISTRAR_ACIERTO` | Reinicia el contador de fallos consecutivos a cero. |
+| `RESET_PARTIDA` | Inicializa el contador al comenzar una nueva partida. |
+| `CLK_100MHz` | Reloj utilizado para actualizar el contador. |
+
+**Salidas:**
+
+| Señal | Descripción |
+|---|---|
+| `FIN_3_FALLOS` | Indica que se alcanzaron tres fallos consecutivos y que la partida debe finalizar. |
+
+**Diseño del bloque:**
+
+El contador solamente necesita representar los estados 0, 1, 2 y 3. Un comparador detecta el valor correspondiente a tres fallos consecutivos y genera `FIN_3_FALLOS`.
+
+---
+
+### 4.3.9 Control de displays
+
+**Función:**
+
+El control de displays se encarga de presentar simultáneamente la cantidad de aciertos y fallos acumulados utilizando los cuatro displays de 7 segmentos de la FPGA.
+
+Se utilizan dos dígitos para representar los aciertos y dos dígitos para representar los fallos.
+
+Por ejemplo:
+
+```text
+ACIERTOS = 27
+FALLOS   = 04
+
+Displays:
+
+  2   7     0   4
+  └─┬─┘     └─┬─┘
+Aciertos     Fallos
 
 # 5. Diagrama de cuarto nivel
 
