@@ -539,161 +539,128 @@ Displays:
   2   7     0   4
   └─┬─┘     └─┬─┘
 Aciertos     Fallos
+text´´´
 
-# 5. Diagrama de cuarto nivel
+## 5. Diagrama de cuarto nivel
 
-## 5.1 Descripción general
+### 5.1 Subsistema FPGA
 
-El cuarto nivel profundiza en la estructura interna de los bloques definidos en el tercer nivel.
-
-En este nivel se muestran los elementos internos necesarios para implementar cada una de las funciones definidas anteriormente.
-
----
-
-## 5.2 Bloque __________________
-
-### Función
-
-Describir detalladamente la función realizada por el bloque.
-
-### Entradas
-
-| Señal | Descripción |
-|---|---|
-| `________` | ______________________________ |
-
-### Salidas
-
-| Señal | Descripción |
-|---|---|
-| `________` | ______________________________ |
-
-### Elementos internos
-
-| Elemento | Función |
-|---|---|
-| `________` | ______________________________ |
-| `________` | ______________________________ |
-| `________` | ______________________________ |
-
-### Diagrama
-
-![Diagrama de cuarto nivel](ruta_imagen)
-
-### Descripción del funcionamiento
-
-Explicar el flujo de información dentro del bloque y la función de cada uno de sus elementos internos.
+En el cuarto nivel se detalla la estructura interna de los bloques definidos en el tercer nivel. A continuación se presenta el desarrollo correspondiente al **Receptor UART**, encargado de recibir la posición del topo enviada desde el subsistema discreto.
 
 ---
 
-## 5.3 Bloque __________________
+### 5.1.1 Receptor UART
 
-### Función
+El Receptor UART recibe la trama serial y reconstruye el byte transmitido. La comunicación utiliza una trama formada por un bit de inicio (`START`), ocho bits de datos y un bit de parada (`STOP`).
 
-Describir detalladamente la función realizada por el bloque.
+De los ocho bits recibidos, los tres bits menos significativos `DATO_RX[2:0]` representan la posición del topo.
 
-### Entradas
+#### Diagrama de bloques
 
-| Señal | Descripción |
-|---|---|
-| `________` | ______________________________ |
+![Diagrama de bloques de cuarto nivel del Receptor UART](fig/Screenshot_20260813-232918-display-0.png.png)
 
-### Salidas
+**Figura 5.1.** Diagrama de bloques de cuarto nivel del Receptor UART.
 
-| Señal | Descripción |
-|---|---|
-| `________` | ______________________________ |
+El receptor está compuesto por los siguientes bloques:
 
-### Elementos internos
+- **Detector de START:** identifica el comienzo de una nueva trama y genera `START_DETECTADO`.
+- **Contador de tiempo de bit:** utiliza `CLK_100MHz` para determinar los instantes adecuados de recepción y genera `PULSO_BIT`.
+- **Contador de bits:** lleva el conteo de los ocho bits recibidos y genera `FIN_8_BITS`.
+- **Lógica de control:** coordina la recepción y genera `MUESTREAR_BIT` y `FIN_RECEPCION`.
+- **Registro de desplazamiento de 8 bits:** almacena secuencialmente los bits recibidos y entrega `DATO_RX[7:0]`.
+- **Registro paralelo de 3 bits:** almacena `DATO_RX[2:0]` como `POSICION_TOPO[2:0]`.
+- **Generador de pulso:** produce `DATO_VALIDO` cuando una nueva posición ha sido recibida correctamente.
 
-| Elemento | Función |
-|---|---|
-| `________` | ______________________________ |
-| `________` | ______________________________ |
-
-### Diagrama
-
-![Diagrama de cuarto nivel](ruta_imagen)
-
-### Descripción del funcionamiento
-
-Describir el funcionamiento interno del bloque.
-
----
-
-# 6. Diagrama de quinto nivel
-
-## 6.1 Descripción general
-
-El quinto nivel corresponde al mayor nivel de detalle del diseño.
-
-En este nivel se representan los componentes elementales necesarios para implementar los bloques definidos en los niveles anteriores.
-
-Dependiendo del bloque, pueden aparecer elementos como:
-
-- Registros.
-- Contadores.
-- Comparadores.
-- Multiplexores.
-- Decodificadores.
-- Divisores de frecuencia.
-- Máquinas de estados.
-- Lógica combinacional.
-- Lógica secuencial.
-
----
-
-## 6.2 Bloque __________________
-
-### Función
-
-Describir la función específica realizada por el bloque.
-
-### Entradas
+#### Señales principales
 
 | Señal | Descripción |
 |---|---|
-| `________` | ______________________________ |
-
-### Salidas
-
-| Señal | Descripción |
-|---|---|
-| `________` | ______________________________ |
-
-### Componentes internos
-
-| Componente | Función |
-|---|---|
-| `________` | ______________________________ |
-| `________` | ______________________________ |
-| `________` | ______________________________ |
-
-### Diagrama
-
-![Diagrama de quinto nivel](ruta_imagen)
-
-### Descripción del funcionamiento
-
-Explicar detalladamente el comportamiento interno del bloque y la relación entre sus diferentes componentes.
+| `SERIAL_SYNC` | Señal serial sincronizada proveniente del subsistema discreto. |
+| `START_DETECTADO` | Indica que se detectó el comienzo de una trama UART. |
+| `PULSO_BIT` | Referencia temporal utilizada para procesar cada bit recibido. |
+| `FIN_8_BITS` | Indica que se completó la recepción de los ocho bits de datos. |
+| `MUESTREAR_BIT` | Habilita el almacenamiento de un nuevo bit en el registro RX. |
+| `FIN_RECEPCION` | Indica que la trama UART fue recibida correctamente. |
+| `DATO_RX[7:0]` | Byte completo reconstruido a partir de la comunicación serial. |
+| `POSICION_TOPO[2:0]` | Posición del topo obtenida de los tres bits menos significativos. |
+| `DATO_VALIDO` | Indica que existe una nueva posición válida disponible. |
+| `CLK_100MHz` | Reloj principal utilizado por los elementos secuenciales. |
+| `RESET` | Reinicia los elementos internos del receptor. |
 
 ---
 
-# 7. Resumen de señales del sistema
+### 5.1.2 Diagrama de estados del Control UART
 
-En esta sección se resumen las principales señales utilizadas en los diferentes niveles del diseño.
+La lógica de control utiliza una máquina de estados finitos para coordinar las diferentes etapas de la recepción UART.
 
-| Señal | Origen | Destino | Tipo/Tamaño | Descripción |
-|---|---|---|---|---|
-| `________` | ________ | ________ | ________ | __________________ |
-| `________` | ________ | ________ | ________ | __________________ |
-| `________` | ________ | ________ | ________ | __________________ |
-| `________` | ________ | ________ | ________ | __________________ |
-| `________` | ________ | ________ | ________ | __________________ |
+![Diagrama de estados del Control UART](fig/Screenshot_20260813-232928-display-0.png.png)
+
+**Figura 5.2.** Diagrama de estados de la FSM del Control UART.
+
+La FSM utiliza cuatro estados:
+
+| Estado | Función |
+|---|---|
+| `ESPERA` | Espera el comienzo de una nueva trama. |
+| `START` | Confirma el bit de inicio. |
+| `DATOS` | Controla la recepción de los ocho bits de datos. |
+| `STOP` | Verifica el bit de parada y finaliza la recepción. |
+
+La secuencia general de funcionamiento es:
+
+```text
+ESPERA → START → DATOS → STOP → ESPERA
+```
+
+En `ESPERA`, el receptor permanece inactivo hasta detectar `START_DETECTADO`. Luego pasa a `START`, donde se confirma el bit de inicio.
+
+Una vez confirmado el inicio, se pasa a `DATOS`. Durante este estado se genera `MUESTREAR_BIT` en los instantes correspondientes y los bits recibidos se almacenan en el registro de desplazamiento.
+
+Cuando `FIN_8_BITS` indica que se recibieron los ocho bits, la FSM pasa a `STOP`. Si el bit de parada es válido, se genera `FIN_RECEPCION` y la máquina regresa a `ESPERA`.
 
 ---
 
-# 8. Consideraciones de diseño
+### 5.1.3 Funcionamiento general
+
+El proceso de recepción puede resumirse de la siguiente manera:
+
+```text
+SERIAL_SYNC
+     │
+     ▼
+Detectar START
+     │
+     ▼
+Confirmar START
+     │
+     ▼
+Recibir 8 bits
+     │
+     ▼
+DATO_RX[7:0]
+     │
+     ▼
+Verificar STOP
+     │
+     ▼
+FIN_RECEPCION
+     │
+     ├──────────────► DATO_VALIDO
+     │
+     ▼
+DATO_RX[2:0]
+     │
+     ▼
+POSICION_TOPO[2:0]
+```
+
+De esta manera, el Receptor UART convierte la información recibida serialmente en una posición de 3 bits que puede ser utilizada por los demás bloques de la FPGA.
+
+El **diagrama de bloques** representa la estructura interna del receptor y la comunicación entre sus componentes, mientras que el **diagrama de estados** representa la secuencia utilizada por la lógica de control para recibir correctamente cada trama.
+
+---
+
+# 6. Consideraciones de diseño
 
 Durante el desarrollo de los diagramas se consideran los siguientes aspectos:
 
@@ -710,10 +677,3 @@ Durante el desarrollo de los diagramas se consideran los siguientes aspectos:
 
 ---
 
-# 9. Conclusiones del diseño inicial
-
-El diseño jerárquico permite dividir el sistema en módulos de menor complejidad, facilitando su comprensión, implementación y posterior verificación.
-
-Cada nivel proporciona progresivamente un mayor grado de detalle, manteniendo una relación clara entre las entradas, salidas, señales internas y funciones de los diferentes bloques que conforman el proyecto.
-
-La estructura definida en este documento servirá como base para las siguientes etapas de implementación y verificación del sistema.
