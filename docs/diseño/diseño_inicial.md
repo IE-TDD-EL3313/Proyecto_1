@@ -539,7 +539,7 @@ Displays:
   2   7     0   4
   └─┬─┘     └─┬─┘
 Aciertos     Fallos
-text´´´
+```
 
 ## 5. Diagrama de cuarto nivel
 
