@@ -128,11 +128,153 @@ En el tercer nivel de diseño se realiza la descomposición interna de los subsi
 
 Para el presente proyecto, el subsistema implementado en la FPGA se divide en bloques encargados de la recepción de la posición del topo, acondicionamiento de los pulsadores, evaluación del golpe, temporización del turno, control de dificultad, conteo de resultados, visualización y control general de la secuencia del juego.
 
-Esta división permite separar las diferentes responsabilidades del sistema y facilita posteriormente el desarrollo, simulación y verificación individual de cada módulo.
+## 4.2 Subsistema Discreto
 
----
+#### 4.2.1 Bloque Oscilador Astable 555
+**Función:** Generar una señal de reloj continua y autónoma que sirve como base de tiempos para todo el subsistema discreto.
 
-## 4.2 Subsistema de la FPGA
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `VCC` / `GND` | Alimentación del circuito (implícita). |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `reloj_alta_frec` | Señal de reloj base generada por el oscilador. |
+
+#### 4.2.2 Bloque Divisor de Frecuencia
+**Función:** Reducir la frecuencia de la señal base para obtener los relojes de operación requeridos por la lógica síncrona y la transmisión serial.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `reloj_alta_frec` | Señal de reloj rápida proveniente del oscilador. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Reloj_baud` | Reloj ajustado a la tasa de baudios para la transmisión UART. |
+| `Clk_local` | Reloj de trabajo para los componentes síncronos del subsistema discreto. |
+
+#### 4.2.3 Bloque Sincronizador de 2 etapas
+**Función:** Mitigar la metastabilidad de la señal de solicitud asíncrona proveniente de la FPGA al ingresarla al dominio de reloj local.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Solicitud_topo` | Señal externa de petición generada por la FPGA (GPIO). |
+| `Clk_local` | Reloj local del subsistema discreto. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `solicitud_sync` | Señal de solicitud alineada de forma segura con el reloj local. |
+
+#### 4.2.4 Bloque Detector de Flanco de subida
+**Función:** Convertir la señal de solicitud sincronizada en un único pulso de un ciclo de reloj para activar las cargas y avances del sistema sin generar repeticiones erróneas.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `solicitud_sync` | Señal de petición sincronizada. |
+| `Clk_local` | Reloj local del subsistema discreto. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Pulso_avance (carga)` | Pulso de control de un ciclo de duración que acciona el LFSR y la UART. |
+
+#### 4.2.5 Bloque Registro LFSR
+**Función:** Generar el estado pseudoaleatorio que determina la secuencia de aparición de los topos.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Pulso_avance (carga)` | Pulso que ordena avanzar al siguiente estado pseudoaleatorio. |
+| `Clk_local` | Reloj local del subsistema discreto. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Estado_LFSR [3:0]` | Bus de 4 bits con el estado pseudoaleatorio actual del registro. |
+
+#### 4.2.6 Bloque Extractor de Posición
+**Función:** Adaptar y recortar el estado completo del LFSR a los bits estrictamente necesarios para representar las 8 posiciones posibles del juego.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Estado_LFSR [3:0]` | Estado actual del LFSR de 4 bits. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Posición_topo [2:0]` | Bus de 3 bits con la posición activa válida para el decodificador y la UART. |
+
+#### 4.2.7 Bloque Registro Trama (START+Datos+Stop)
+**Función:** Empaquetar estáticamente los 3 bits de posición junto con los bits fijos de inicio (START), parada (STOP) y relleno para formar la estructura de una trama UART de 10 bits.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Posición_topo [2:0]` | Bits con la información de la posición activa. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Trama_Paralelo [9:0]` | Bus de 10 bits con la trama completa armada en paralelo. |
+
+#### 4.2.8 Bloque Contador de bits
+**Función:** Llevar el registro de cuántos bits han sido transmitidos para habilitar o deshabilitar el desplazamiento del registro serializador.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Pulso_avance (carga)` | Señal que reinicia el contador al iniciar una nueva transmisión. |
+| `Reloj_baud` | Reloj de la tasa de transmisión. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Cuenta_bits [3:0]` | Estado actual del conteo de bits transmitidos. |
+| `Habilita_shift` | Señal de control que permite el desplazamiento en el registro serial. |
+
+#### 4.2.9 Bloque Registro Paralelo-Serie
+**Función:** Recibir la trama armada en paralelo y desplazarla bit a bit de manera serial hacia la FPGA a la velocidad dictada por el reloj de baudios.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Trama_Paralelo [9:0]` | La trama de 10 bits lista para enviar. |
+| `Pulso_avance (carga)` | Pulso que indica cargar la trama en los registros. |
+| `Reloj_baud` | Reloj que dicta el ritmo de desplazamiento de los datos. |
+| `Habilita_shift` | Permiso del contador para realizar el desplazamiento. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Tx_serial` | Línea de datos serie que viaja hacia el subsistema FPGA. |
+
+#### 4.2.10 Bloque Decodificador 3->8
+**Función:** Traducir los 3 bits de posición en una única línea activa para encender físicamente el LED correspondiente al topo en el protoboard.
+
+**Entradas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `Posición_topo [2:0]` | Bus con la posición activa del topo. |
+
+**Salidas:**
+| Señal | Descripción |
+| :--- | :--- |
+| `LEDs_topo [7:0]` | Bus de 8 líneas donde solo una está activa para encender el LED físico. |
+
+
+
+
+
+
+## 4.3 Subsistema de la FPGA
 
 El subsistema FPGA constituye la unidad de control principal del juego. Su función es recibir la posición generada por el subsistema discreto, procesar las entradas provenientes de los pulsadores, determinar si la acción del jugador corresponde a un acierto o un fallo, controlar la duración de los turnos, actualizar los contadores y coordinar el desarrollo completo de la partida.
 
@@ -146,7 +288,7 @@ Los bloques funcionales que conforman este subsistema se describen en las siguie
 
 ---
 
-### 4.2.1 Receptor UART
+### 4.3.1 Receptor UART
 
 **Función:**
 
@@ -177,7 +319,7 @@ El receptor se diseñó de manera modular. Internamente se consideran funciones 
 
 ---
 
-### 4.2.2 Sincronización y antirrebote
+### 4.3.2 Sincronización y antirrebote
 
 **Función:**
 
@@ -207,7 +349,7 @@ El acondicionamiento se realiza mediante una etapa de sincronización seguida po
 
 ---
 
-### 4.2.3 Evaluador de golpe
+### 4.3.3 Evaluador de golpe
 
 **Función:**
 
@@ -238,7 +380,7 @@ El bloque realiza una comparación entre la posición codificada del topo y el p
 
 ---
 
-### 4.2.4 Temporizador del turno
+### 4.3.4 Temporizador del turno
 
 **Función:**
 
@@ -269,7 +411,7 @@ El temporizador utiliza el reloj principal junto con una habilitación temporal 
 
 ---
 
-### 4.2.5 Control de dificultad
+### 4.3.5 Control de dificultad
 
 **Función:**
 
@@ -299,7 +441,7 @@ El bloque mantiene un registro con la duración actual. Ante cada acierto se com
 
 ---
 
-### 4.2.6 Contador de aciertos
+### 4.3.6 Contador de aciertos
 
 **Función:**
 
@@ -323,7 +465,7 @@ El contador se incrementa cada vez que la FSM principal genera `REGISTRAR_ACIERT
 
 ---
 
-### 4.2.7 Contador de fallos acumulados
+### 4.3.7 Contador de fallos acumulados
 
 **Función:**
 
@@ -349,7 +491,7 @@ El valor acumulado se conserva aunque posteriormente ocurra un acierto y solamen
 
 ---
 
-### 4.2.8 Contador de fallos consecutivos
+### 4.3.8 Contador de fallos consecutivos
 
 **Función:**
 
@@ -378,7 +520,7 @@ El contador solamente necesita representar los estados 0, 1, 2 y 3. Un comparado
 
 ---
 
-### 4.2.9 Control de displays
+### 4.3.9 Control de displays
 
 **Función:**
 
