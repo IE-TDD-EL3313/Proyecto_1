@@ -2,11 +2,11 @@
 
 ## 1. Introducción
 
-Este documento presenta el diseño inicial del sistema desarrollado para el Proyecto 1 del curso EL3313.
+Este documento presenta el diseño inicial del sistema **Whack-a-Mole**, desarrollado para el Proyecto 1 del curso EL3313.
 
-El diseño se realiza siguiendo una metodología de diseño modular y jerárquico, en la cual el sistema se descompone progresivamente en subsistemas y bloques de menor nivel.
+El diseño se realiza siguiendo una metodología modular y jerárquica, en la cual el sistema se descompone progresivamente en subsistemas y bloques de menor nivel. De esta manera, se parte de una representación general de las entradas y salidas del sistema y posteriormente se detallan las funciones y componentes internos necesarios para su implementación.
 
-Se presentan los diagramas correspondientes a los diferentes niveles de diseño, desde la representación general del sistema hasta la descripción detallada de los módulos internos que posteriormente serán implementados.
+En las siguientes secciones se presentan los diagramas correspondientes a los diferentes niveles de diseño.
 
 ---
 
@@ -14,38 +14,59 @@ Se presentan los diagramas correspondientes a los diferentes niveles de diseño,
 
 ## 2.1 Descripción general
 
-El diagrama de primer nivel representa el sistema de Whack-a-Mole completo como un único bloque. Su propósito es identificar las entradas y salidas externas necesarias para el funcionamiento del juego, sin mostrar todavía la estructura interna ni los módulos utilizados para cada función. 
+El diagrama de primer nivel representa el sistema **Whack-a-Mole** completo como un único bloque funcional. En este nivel se identifican únicamente las entradas y salidas externas del sistema, sin mostrar su estructura interna.
 
-El sistema recibe como entradas los ocho pulsadores externos utilizados por el jugador, la señal de reinicio manual y el reloj de 100 MHz. A partir de estas entradas, el sistema controla el desarrollo de la partida y genera las señales necesarias para indicar la posición activa del topo y mostrar los resultados obtenidos por el jugador.
+El sistema dispone de ocho pulsadores que permiten al jugador interactuar con las ocho posibles posiciones del topo. Durante cada turno, una de estas posiciones se activa y se indica visualmente mediante uno de los ocho LEDs.
 
-Durante cada turno se selecciona una de ocho posiciones posibles, la cual se indica mediante uno de los ocho LEDs disponibles. El jugador debe presionar el pulsador correspondiente a la posición activa dentro del tiempo permitido. El sistema determina si la acción corresponde a un acierto o un fallo y actualiza los resultados de la partida.
+El jugador debe presionar el pulsador correspondiente a la posición activa dentro del tiempo disponible. A partir de esta acción, el sistema determina el resultado del turno y actualiza los aciertos y fallos acumulados, los cuales se muestran mediante los cuatro displays de 7 segmentos.
 
-Los aciertos y los fallos acumulados se muestran mediante cuatro displays de 7 segmentos.
+El sistema utiliza además un reloj de 100 MHz como referencia temporal para la lógica implementada en la FPGA y una señal de reinicio para regresar el juego a sus condiciones iniciales.
+
+---
+
 ## 2.2 Entradas
+
+Las entradas externas identificadas en el diagrama de primer nivel son:
 
 | Señal | Descripción |
 |---|---|
-| `Reloj de 100 MHz` | `Señal de reloj principal utilizada por el subsistema implementado en la FPGA` |
-| `Ocho pulsadores` | `Permiten al jugador seleccionar una de las ocho posiciones del topo` |
-| `Señal de reinicio` | `Permite reiniciar manualmente el juego y restablecer las condiciones iniciales` |
+| `Reloj 100 MHz` | Señal de reloj principal utilizada como referencia temporal por la lógica implementada en la FPGA. |
+| `8 pulsadores` | Pulsadores utilizados por el jugador para seleccionar una de las ocho posiciones posibles del topo. |
+| `Reinicio` | Señal utilizada para reiniciar el juego y restablecer sus condiciones iniciales. |
+
+---
 
 ## 2.3 Salidas
 
+Las salidas externas del sistema son:
+
 | Señal | Descripción |
 |---|---|
-| `Ocho LEDs de posición` | `Indican visualmente cuál de las ocho posiciones corresponde al topo activo` |
-| `Cuatro displays de 7 segmentos` | `Muestran la cantidad acumulada de aciertos y fallos` |
+| `8 LEDs` | Indican visualmente cuál de las ocho posiciones del topo se encuentra activa durante el turno. |
+| `7 segmentos` | Señales asociadas a los cuatro displays de 7 segmentos utilizados para mostrar los aciertos y fallos acumulados. |
+
+---
+
+## 2.4 Diagrama de primer nivel
+
+El diagrama de primer nivel del sistema se presenta a continuación:
+
+![Diagrama de primer nivel](fig/Diagrama%20de%20Primer%20Nivel.jpeg)
 
 
-## 2.4 Diagrama
-
-![Diagrama de primer nivel](ruta_imagen)
+---
 
 ## 2.5 Descripción del funcionamiento
 
-El sistema inicia la partida bajo las condiciones iniciales establecidas y selecciona una posición del topo. Mientras dicha posición permanece activa, el jugador puede responder mediante uno de los ocho pulsadores externos. El sistema evalúa la respuesta, actualiza los contadores y continua con un nuevo turno mientras no se alcance la condición de finalización del juego.
+El funcionamiento general del sistema comienza con la selección de una de las ocho posiciones posibles del topo. La posición activa se representa visualmente mediante uno de los ocho LEDs.
 
-El reloj de 100 MHz proporciona la referencia temporal principal para las funciones implementadas en la FPGA.
+El jugador responde utilizando el pulsador asociado a la posición que considera activa. El sistema procesa esta acción y determina si corresponde a un acierto o un fallo.
+
+Después de evaluar el resultado, se actualizan los contadores correspondientes y se inicia un nuevo turno. Los aciertos y fallos acumulados durante la partida se muestran simultáneamente mediante los cuatro displays de 7 segmentos.
+
+La señal de reloj de 100 MHz proporciona la referencia temporal necesaria para el funcionamiento de la lógica implementada en la FPGA, mientras que la entrada de reinicio permite devolver el sistema a su estado inicial.
+
+En este nivel no se especifica cómo se realizan internamente estas funciones, ya que dicha descomposición se desarrolla en los diagramas de niveles posteriores.
 
 ---
 
@@ -138,8 +159,6 @@ Internamente, este subsistema está formado por los siguientes bloques principal
 El diagrama de segundo nivel del sistema se presenta a continuación:
 
 ![Diagrama de segundo nivel](fig/Diagrama%20de%20segundo%20nivel.jpeg)
-
-**Figura 3.1.** Diagrama de segundo nivel del sistema.
 
 El diagrama muestra la división del diseño en los dos subsistemas principales y el flujo de información entre sus bloques internos.
 
