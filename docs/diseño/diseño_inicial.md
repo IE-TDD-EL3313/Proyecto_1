@@ -53,32 +53,45 @@ El reloj de 100 MHz proporciona la referencia temporal principal para las funcio
 
 ## 3.1 Descripción general
 
-El diagrama de segundo nivel divide el sistema completo en dos subsistemas principales: el subsistema discreto y el subsistema FPGA. Ambos trabajan de forma conjunta para realizar las diferentes funciones necesarias durante el desarrollo del juego.
+El diagrama de segundo nivel divide el sistema completo en dos subsistemas principales: el **Subsistema Discreto** y el **Subsistema FPGA**. Ambos trabajan de manera conjunta para implementar el funcionamiento del juego.
 
-El subsistema discreto se encarga principalmente de generar la posición pseudoaleatoria del topo, indicar dicha posición mediante uno de los ocho LEDs y preparar la información necesaria para transmitirla hacia la FPGA mediante comunicación UART. El subsistema FPGA funciona como el controlador principal del juego, encargándose de recibir la posición generada, procesar las acciones del jugador, controlar la duración de los turnos, manejar la dificultad y actualizar los resultados mostrados en los displays.
+El **Subsistema Discreto** se encarga de generar la posición pseudoaleatoria del topo, indicar visualmente la posición seleccionada mediante uno de los ocho LEDs y transmitir dicha posición hacia la FPGA mediante comunicación UART.
 
-La comunicación entre ambos subsistemas se realiza en dos direcciones. La FPGA envía una señal de solicitud de topo al subsistema discreto para indicar cuando debe generarse una nueva posición. Y el subsistema discreto transmite la posición generada hacia la FPGA mediante el enlace serial UART.
+El **Subsistema FPGA** funciona como el controlador principal del juego. Este recibe la posición generada por el circuito discreto, procesa las entradas de los ocho pulsadores, determina el resultado de cada turno, controla su duración y dificultad, mantiene los contadores de aciertos y fallos y presenta los resultados mediante los cuatro displays de 7 segmentos.
+
+La comunicación entre ambos subsistemas es bidireccional. La FPGA genera una señal de **solicitud de topo** para indicar cuándo se requiere una nueva posición, mientras que el subsistema discreto responde transmitiendo la posición generada mediante UART.
+
+---
 
 ## 3.2 Subsistemas principales
 
-### 3.2.1 Subsistema discreto
+### 3.2.1 Subsistema Discreto
 
 **Función:**
 
-Generar una nueva posición pseudoaleatoria cada vez que la FPGA lo solicite, indicar visualmente la posición seleccionada mediante uno de los ocho LEDs y transmitir la información correspondiente hacia la FPGA mediante comunicación serial.
+El Subsistema Discreto tiene como función generar una nueva posición pseudoaleatoria cuando la FPGA lo solicita. La posición seleccionada se representa mediante uno de los ocho LEDs y, simultáneamente, se prepara para ser transmitida hacia la FPGA mediante comunicación UART.
+
+Internamente, este subsistema está formado por los siguientes bloques principales:
+
+- **Control de solicitud:** detecta y procesa la solicitud proveniente de la FPGA.
+- **LFSR pseudoaleatorio:** genera la nueva posición del topo.
+- **Decodificador 3 a 8:** convierte la posición de 3 bits en una señal de ocho líneas para activar únicamente el LED correspondiente.
+- **Preparación del byte UART:** construye el byte que contiene la posición que será transmitida.
+- **Registro/Transmisión UART:** realiza la transmisión serial de la información hacia la FPGA.
+- **Generador de referencia temporal:** proporciona la temporización necesaria para realizar la transmisión UART.
 
 **Entradas:**
 
 | Señal | Descripción |
 |---|---|
-| `Solicitud del topo` | `Señal proveniente de la FPGA que indica cuando debe generarse una nueva posición para el siguiente turno.` |
+| `SOLICITUD_TOPO` | Señal proveniente de la FPGA que indica cuándo debe generarse una nueva posición del topo. |
 
 **Salidas:**
 
 | Señal | Descripción |
 |---|---|
-| `UART TX` | `Señal serial que contiene la posición generada y se transmite hacia la FPGA mediante UART` |
-| `LED[7:0]` | `Ocho señales utilizadas para indicar visualmente cuál de las posiciones del topo se encuentra activa` |
+| `UART_TX` | Señal serial mediante la cual se transmite hacia la FPGA el byte que contiene la posición generada. |
+| `LED[7:0]` | Ocho señales utilizadas para indicar visualmente cuál de las ocho posiciones del topo se encuentra activa. |
 
 ---
 
@@ -86,37 +99,153 @@ Generar una nueva posición pseudoaleatoria cada vez que la FPGA lo solicite, in
 
 **Función:**
 
-Controlar el funcionamiento general del juego, recibiendo la posición generada por el subsistema discreto, procesando las acciones realizadas por el jugador y administrando los tiempos, dificultad, aciertos, fallos y visualizació de resultados.
+El Subsistema FPGA se encarga de controlar el funcionamiento general del juego. Recibe la posición generada por el Subsistema Discreto, procesa las acciones realizadas por el jugador y coordina la secuencia de cada turno.
+
+Además, administra la duración de la ventana de respuesta, modifica progresivamente la dificultad, registra los aciertos y fallos y controla la visualización de los resultados.
+
+Internamente, este subsistema está formado por los siguientes bloques principales:
+
+- **Sincronizador UART:** sincroniza la señal serial recibida con el dominio de reloj de la FPGA.
+- **UART RX:** recibe y reconstruye la información transmitida mediante UART.
+- **Registro de posición:** almacena la posición del topo recibida.
+- **FSM del juego:** coordina la secuencia general de funcionamiento del sistema.
+- **Temporizador del turno:** controla el tiempo disponible para responder.
+- **Control de dificultad:** determina la duración de los turnos conforme avanza la partida.
+- **Contadores del juego:** mantienen los valores de aciertos, fallos y las condiciones necesarias para determinar el final de la partida.
+- **Control de 7 segmentos:** permite visualizar los aciertos y fallos acumulados.
 
 **Entradas:**
 
 | Señal | Descripción |
 |---|---|
-| `UART RX` | `Señal serial proveniente del subsistema discreto que contiene la posición del topo` |
-| `Botones[7:0]` | `Ocho pulsadores externos utilizados por el jugador para seleccionar la posición que desea golpear` |
-| `CLK_100MHz` | `Reloj principal de 100 MHz utilizado por la lógica implementada en la FPGA` |
-| `Reset` | `Señal utilizada para reiniciar el juego y regresar el sistema a sus condiciones iniciales` |
+| `UART_RX` | Señal serial proveniente del Subsistema Discreto que contiene la posición generada. |
+| `BOTONES[7:0]` | Ocho pulsadores utilizados por el jugador para seleccionar la posición que desea golpear. |
+| `CLK_100MHz` | Reloj principal utilizado por la lógica implementada en la FPGA. |
+| `RESET` | Señal utilizada para reiniciar el sistema y devolverlo a sus condiciones iniciales. |
 
 **Salidas:**
 
 | Señal | Descripción |
 |---|---|
-| `Solicitud del topo` | `Señal enviada hacia el subsistema discreto para solicitar la generación de una nueva posición` |
-| `aciertos/fallos` | `Señales utilizadas para controlar los cuatro displays de 7 segmentos y mostrar los aciertos y fallos acumulados` |
+| `SOLICITUD_TOPO` | Señal enviada al Subsistema Discreto para solicitar la generación y transmisión de una nueva posición. |
+| `SEG[6:0]` | Señales utilizadas para controlar los segmentos de los displays de 7 segmentos. |
+| `AN[3:0]` | Señales utilizadas para seleccionar los cuatro displays durante su multiplexación. |
 
-## 3.3 Diagrama
+---
 
-![Diagrama de segundo nivel](ruta_imagen)
+## 3.3 Diagrama de segundo nivel
+
+El diagrama de segundo nivel del sistema se presenta a continuación:
+
+![Diagrama de segundo nivel](fig/Diagrama de segundo nivel.jpeg)
+
+**Figura 3.1.** Diagrama de segundo nivel del sistema.
+
+El diagrama muestra la división del diseño en los dos subsistemas principales y el flujo de información entre sus bloques internos.
+
+En el Subsistema Discreto, una solicitud proveniente de la FPGA inicia la generación de una nueva posición. El valor producido por el LFSR se utiliza tanto para seleccionar uno de los ocho LEDs como para preparar el byte que será transmitido mediante UART.
+
+En el Subsistema FPGA, la información recibida pasa inicialmente por la etapa de sincronización y recepción UART. La posición obtenida es almacenada y utilizada posteriormente por la FSM del juego para coordinar el desarrollo de cada turno.
+
+La FSM interactúa con el temporizador, el control de dificultad y los contadores del juego para determinar la duración del turno, procesar las acciones del jugador y actualizar los resultados.
+
+---
 
 ## 3.4 Comunicación entre subsistemas
 
-La comunicación entre subsistemas se realiza mediante dos señales principales. Debido a que ambos subsistemas operan con referencias temporales independientes, no se comparte ninguna señal de reloj entre ellos.
+La comunicación entre el Subsistema Discreto y el Subsistema FPGA se realiza mediante dos señales principales:
 
-La señal solicitud del topo permite que la FPGA controle cuando debe generarse una nueva posición. Al recibir esta señal, el subsistema discreto actualiza el valor pseudoaleatorio y prepara la posición obtenida para su transmisión.
+```text
+                   SOLICITUD_TOPO
+      FPGA ─────────────────────────► DISCRETO
 
-Posteriormente, la posición se envía mediante la línea UART desde la salida UART TX hacia la entrada UART RX. La transmisión utiliza una trama 8N1, donde los tres bits menos significativos del byte representan una de las ocho posibles posiciones del topo.
+                     UART
+      FPGA ◄───────────────────────── DISCRETO
+```
 
-De esta manera, la FPGA determina cuando iniciar un nuevo turno, mientras que el subsistema discreto es el encargado de generar y devolver la nueva posición correspondiente.
+No es necesario compartir una señal de reloj entre ambos subsistemas, ya que cada uno trabaja con su propia referencia temporal.
+
+### Solicitud de una nueva posición
+
+Cuando la FPGA necesita comenzar un nuevo turno, la FSM del juego genera:
+
+```text
+SOLICITUD_TOPO
+```
+
+Esta señal es enviada al Subsistema Discreto y procesada por el bloque de Control de solicitud.
+
+Como respuesta, el LFSR genera una nueva posición pseudoaleatoria. Esta posición se utiliza para activar el LED correspondiente y para preparar el byte que será enviado a la FPGA.
+
+### Transmisión de la posición
+
+Una vez obtenida la posición, el Subsistema Discreto realiza la transmisión mediante la línea:
+
+```text
+UART_TX
+```
+
+Esta señal se conecta con la entrada:
+
+```text
+UART_RX
+```
+
+del Subsistema FPGA.
+
+La comunicación utiliza una trama UART **8N1**, formada por:
+
+- 1 bit de inicio (`START`).
+- 8 bits de datos.
+- Sin bit de paridad.
+- 1 bit de parada (`STOP`).
+
+Dentro del byte transmitido, los tres bits menos significativos contienen la posición del topo:
+
+```text
+DATO[2:0] = POSICION_TOPO[2:0]
+```
+
+Estos tres bits permiten representar las ocho posiciones posibles:
+
+| Valor binario | Posición |
+|---|---:|
+| `000` | 0 |
+| `001` | 1 |
+| `010` | 2 |
+| `011` | 3 |
+| `100` | 4 |
+| `101` | 5 |
+| `110` | 6 |
+| `111` | 7 |
+
+Una vez recibida la posición, la FPGA puede iniciar el turno correspondiente y evaluar la acción realizada por el jugador.
+
+Por lo tanto, la secuencia general de comunicación entre ambos subsistemas es:
+
+```text
+FPGA
+ │
+ │ SOLICITUD_TOPO
+ ▼
+SUBSISTEMA DISCRETO
+ │
+ ├──► Genera posición pseudoaleatoria
+ │
+ ├──► Activa LED correspondiente
+ │
+ └──► Transmite posición por UART
+              │
+              ▼
+             FPGA
+              │
+              ├──► Recibe posición
+              ├──► Inicia turno
+              ├──► Evalúa al jugador
+              └──► Solicita siguiente posición
+```
+
+Esta organización permite mantener separadas las funciones de **generación de la posición**, implementadas mediante lógica discreta, y las funciones de **control del juego**, implementadas en la FPGA.
 
 ---
 
