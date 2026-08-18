@@ -815,7 +815,8 @@ El subsistema discreto se encarga de recibir las solicitudes provenientes de la 
 
 La siguiente figura muestra el diagrama de cuarto nivel correspondiente al subsistema discreto y las señales utilizadas para la comunicación entre sus diferentes módulos.
 
-![Diagrama de cuarto nivel del subsistema discreto](ruta_imagen_diagrama_general)
+![Diagrama de cuarto nivel del subsistema discreto](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/dise%C3%B1o/fig/WhatsApp%20Image%202026-08-18%20at%202.05.20%20AM.jpeg
+)
 
 ---
 
@@ -926,7 +927,7 @@ La salida seleccionada controla el LED correspondiente, mostrando visualmente la
 
 La siguiente figura presenta las tablas de estado correspondientes a los módulos secuenciales del subsistema discreto.
 
-![Tablas de estado del subsistema discreto](ruta_imagen_tablas_estado)
+![Tablas de estado del subsistema discreto](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/dise%C3%B1o/fig/WhatsApp%20Image%202026-08-18%20at%202.06.50%20AM.jpeg)
 
 ---
 
