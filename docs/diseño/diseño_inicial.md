@@ -931,19 +931,51 @@ La siguiente figura presenta las tablas de estado correspondientes a los módulo
 
 ---
 
-### 5.2.6 [Nombre del módulo]
+### 5.2.6 Generador de referencia temporal
 
 #### Función
 
+El **Generador de Referencia Temporal** se encarga de producir la señal de temporización necesaria para controlar la velocidad de transmisión del UART implementado en el subsistema discreto.
+
+Este bloque genera una referencia periódica independiente del reloj de la FPGA y proporciona la señal `BAUD_TICK`, utilizada por el transmisor UART para determinar cuándo debe avanzar al siguiente bit de la trama.
+
+#### Diagrama
+
+![Diagrama de cuarto nivel del Generador de Referencia Temporal](fig/Screenshot_20260818-105606-display-0.png.png)
+
 #### Entradas
+
+El bloque no requiere una señal de reloj externa, ya que genera internamente su propia referencia temporal. El oscilador utiliza resistencias y capacitores como parte de su circuito para establecer la frecuencia de funcionamiento.
 
 #### Salidas
 
+| Señal | Descripción |
+|---|---|
+| `BAUD_TICK` | Señal periódica utilizada por el transmisor UART como referencia para avanzar de un bit de la trama al siguiente. |
+
 #### Elementos internos
+
+El Generador de Referencia Temporal está compuesto por:
+
+- **Oscilador astable NE555:** genera una señal periódica denominada `CLK_BASE`. Su frecuencia está determinada por los valores de las resistencias y el capacitor utilizados en el circuito.
+- **Divisor de frecuencia:** recibe `CLK_BASE` y reduce su frecuencia hasta obtener la referencia temporal requerida por la comunicación UART.
 
 #### Funcionamiento
 
+El oscilador NE555 genera continuamente la señal `CLK_BASE`. Esta señal se introduce al divisor de frecuencia, encargado de obtener una frecuencia adecuada para la velocidad de transmisión UART seleccionada.
+
+La salida del divisor corresponde a `BAUD_TICK`. Esta señal es utilizada únicamente dentro del subsistema discreto y permite que el transmisor UART mantenga cada bit durante el intervalo de tiempo correspondiente.
+
+De esta manera, el transmisor puede recorrer ordenadamente la trama:
+
+```text
+START → D0 → D1 → D2 → D3 → D4 → D5 → D6 → D7 → STOP
+```
+
+Cada evento de `BAUD_TICK` sirve como referencia para avanzar al siguiente bit de la transmisión.
+
 ---
+
 
 ### 5.2.7 [Nombre del módulo]
 
