@@ -807,6 +807,103 @@ De esta manera, el Receptor UART convierte la información recibida serialmente 
 El **diagrama de bloques** representa la estructura interna del receptor y la comunicación entre sus componentes, mientras que el **diagrama de estados** representa la secuencia utilizada por la lógica de control para recibir correctamente cada trama.
 
 ---
+
+### 5.1.4 Sincronización y antirrebote de los pulsadores
+
+#### Función
+
+El bloque de **Sincronización y Antirrebote** se encarga de acondicionar las señales provenientes de los ocho pulsadores utilizados por el jugador antes de que sean procesadas por la lógica del juego.
+
+Debido a que los pulsadores son señales externas a la FPGA, sus cambios no se encuentran sincronizados con el reloj del sistema y, además, pueden presentar rebotes mecánicos durante una pulsación. Por esta razón, el bloque realiza tres operaciones principales: sincronización, eliminación de rebotes y detección de una nueva pulsación.
+
+La salida final es `GOLPE_LIMPIO[7:0]`, donde cada bit genera un único pulso asociado a una pulsación válida.
+
+#### Diagrama
+
+![Diagrama de cuarto nivel del bloque de Sincronización y Antirrebote](fig/Screenshot_20260818-121659-display-0.png.png)
+
+
+#### Entradas
+
+| Señal | Descripción |
+|---|---|
+| `GOLPE[7:0]` | Señales provenientes de los ocho pulsadores utilizados por el jugador. |
+| `CLK` | Reloj utilizado para sincronizar y procesar las señales de los pulsadores. |
+| `RESET` | Reinicia los registros y contadores internos del bloque. |
+
+#### Salidas
+
+| Señal | Descripción |
+|---|---|
+| `GOLPE_LIMPIO[7:0]` | Vector de pulsos limpios. Cada bit indica la detección de una nueva pulsación válida en el botón correspondiente. |
+
+#### Elementos internos
+
+El bloque está compuesto por los siguientes elementos:
+
+- **Registros FF1 y FF2:** forman un sincronizador de dos etapas para llevar las señales de los pulsadores al dominio de reloj de la FPGA.
+- **Detector de cambio:** identifica cuando alguno de los pulsadores sincronizados presenta un cambio de estado.
+- **Contador de estabilidad:** verifica que el nuevo estado permanezca estable durante el tiempo definido para eliminar los rebotes mecánicos.
+- **Registro de estado estable:** almacena el valor del pulsador una vez que se ha comprobado su estabilidad.
+- **Registro de estado anterior:** conserva el estado estable del ciclo anterior.
+- **Detector de flanco 0 → 1:** compara el estado actual con el anterior para generar un único pulso cuando se detecta una nueva pulsación.
+
+Las principales señales internas son:
+
+| Señal | Descripción |
+|---|---|
+| `GOLPE_SYNC[7:0]` | Estado de los ocho pulsadores después de las dos etapas de sincronización. |
+| `TIEMPO_CUMPLIDO` | Indica que la entrada ha permanecido estable durante el tiempo requerido por el filtro antirrebote. |
+| `GOLPE_ESTABLE[7:0]` | Estado de los pulsadores después de eliminar los rebotes. |
+| `GOLPE_ANTERIOR[7:0]` | Valor anterior de `GOLPE_ESTABLE[7:0]`, utilizado para detectar nuevas pulsaciones. |
+
+#### Funcionamiento
+
+Las señales `GOLPE[7:0]` pasan inicialmente por los registros `FF1` y `FF2`, obteniéndose `GOLPE_SYNC[7:0]`. Esta doble etapa permite sincronizar las entradas externas con el reloj utilizado por la FPGA.
+
+Posteriormente, el filtro antirrebote verifica que cualquier cambio detectado permanezca estable durante un intervalo determinado. Cuando se cumple este tiempo, se actualiza el registro de estado estable y se obtiene `GOLPE_ESTABLE[7:0]`.
+
+Finalmente, el estado estable se compara con su valor anterior. Se considera una nueva pulsación cuando el estado actual es `1` y el estado anterior era `0`. Para cada pulsador, esta condición puede expresarse como:
+
+```text
+GOLPE_LIMPIO[i] =
+GOLPE_ESTABLE[i] AND NOT GOLPE_ANTERIOR[i]
+```
+
+De esta forma, aunque el jugador mantenga presionado un botón durante varios ciclos de reloj, el sistema genera solamente un pulso en `GOLPE_LIMPIO[7:0]` por cada nueva pulsación.
+
+El flujo general del bloque puede resumirse como:
+
+```text
+GOLPE[7:0]
+     │
+     ▼
+Sincronización
+de 2 etapas
+     │
+     ▼
+GOLPE_SYNC[7:0]
+     │
+     ▼
+Filtro
+antirrebote
+     │
+     ▼
+GOLPE_ESTABLE[7:0]
+     │
+     ▼
+Detección
+de flanco 0 → 1
+     │
+     ▼
+GOLPE_LIMPIO[7:0]
+```
+
+La señal `GOLPE_LIMPIO[7:0]` queda así preparada para ser utilizada por el bloque encargado de evaluar el golpe realizado por el jugador.
+
+---
+
+
 ## 5.2 Subsistema Discreto
 
 El subsistema discreto se encarga de recibir las solicitudes provenientes de la FPGA, generar las posiciones pseudoaleatorias del topo, indicar visualmente la posición activa y realizar la comunicación de dicha información hacia la FPGA.
