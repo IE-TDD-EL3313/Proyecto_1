@@ -975,21 +975,166 @@ START → D0 → D1 → D2 → D3 → D4 → D5 → D6 → D7 → STOP
 Cada evento de `BAUD_TICK` sirve como referencia para avanzar al siguiente bit de la transmisión.
 
 ---
-
-
-### 5.2.7 [Nombre del módulo]
+### 5.2.7 Registro / Transmisión UART
 
 #### Función
-
-#### Entradas
-
-#### Salidas
-
-#### Elementos internos
-
-#### Funcionamiento
+En esta sección se detalla el cuarto nivel del bloque **Registro / Transmisión UART** del subsistema discreto, el cual se encarga de convertir el byte de posición paralelo en una trama serie para enviarla hacia la FPGA.
 
 ---
+
+### 5.2.7.1 Máquina de estados (FSM de transmisión)
+
+La FSM de transmisión es una máquina de Moore de 4 estados, sincronizada mediante la señal `BAUD_TICK`. Su función es coordinar el ciclo completo de la transmisión serial de la trama UART (IDLE, START, DATA, STOP).
+
+![Diagrama de estados de la FSM de transmisión](fig/diagrama_transiciones.png)
+
+**Figura 5.3.** Diagrama de estados de la FSM de transmisión UART.
+
+#### Tabla de transición de la FSM
+
+| Estado actual | Condición | Estado siguiente | Salidas activas |
+|---|---|---|---|
+| `IDLE` | `INICIAR_TX=0` | `IDLE` | `UART_TX=1`, `TX_LISTO=1` |
+| `IDLE` | `INICIAR_TX=1` | `START` | `LOAD_TX=1`, `TX_BUSY=1`, `TX_LISTO=0` |
+| `START` | `BAUD_TICK=0` | `START` | `UART_TX=0` |
+| `START` | `BAUD_TICK=1` | `DATA` | `BIT_COUNT←0` |
+| `DATA` | `BAUD_TICK=1` · `BIT_COUNT<7` | `DATA` | `SHIFT_EN=1`, `UART_TX=Q_SHIFT` |
+| `DATA` | `BAUD_TICK=1` · `BIT_COUNT=7` | `STOP` | `SHIFT_EN=1` (último bit) |
+| `STOP` | `BAUD_TICK=0` | `STOP` | `UART_TX=1` |
+| `STOP` | `BAUD_TICK=1` | `IDLE` | `TX_LISTO=1`, `TX_BUSY=0` |
+
+Para codificar los 4 estados se emplean 2 bits de estado ($E_1 E_0$): `00 = IDLE`, `01 = START`, `10 = DATA`, `11 = STOP`.
+
+---
+
+### 5.2.7.2 Interconexión de subbloques
+
+El bloque de Registro / Transmisión UART integra cuatro componentes principales: el registro de desplazamiento, el contador de bits, la FSM de transmisión y el selector de salida.
+
+![Esquemático de interconexiones del Registro / Transmisión UART](fig/diagrama_conex_sbloques.png)
+
+**Figura 5.4.** Diagrama de interconexiones del bloque Registro / Transmisión UART.
+
+#### Dirección de las señales (resumen):
+
+| Señal | Origen | Destino |
+|---|---|---|
+| `DATO_TX[7:0]` | Preparación byte UART | Registro TX |
+| `INICIAR_TX` | Control de Solicitud | FSM |
+| `BAUD_TICK` | Generador de Referencia Temporal | FSM, Contador, Registro (vía SHIFT_EN) |
+| `LOAD_TX` | FSM | Registro TX |
+| `SHIFT_EN` | FSM | Registro TX, Contador de bits |
+| `BIT_COUNT[2:0]` | Contador de bits | FSM (comparación =7) |
+| `Q_SHIFT` | Registro TX | Selector de salida |
+| `ESTADO[1:0]` | FSM | Selector de salida |
+| `UART_TX` | Selector de salida | FPGA (salida del bloque) |
+| `TX_BUSY`, `TX_LISTO` | FSM | Control de Solicitud (salida del bloque) |
+
+---
+
+### 5.2.7.3 Registro de desplazamiento TX
+
+#### Función
+Cargar en paralelo el byte de datos `DATO_TX[7:0]` y entregarlo bit por bit (empezando por el LSB) en cada `BAUD_TICK` durante el estado `DATA`.
+
+#### Entradas
+* `DATO_TX[7:0]` (Paralelo): Byte de posición a transmitir.
+* `BAUD_TICK`: Señal de reloj de baudios que sincroniza el desplazamiento.
+* `LOAD_TX`: Señal proveniente de la FSM para habilitar la carga paralela.
+* `SHIFT_EN`: Señal de control para habilitar el desplazamiento de los bits.
+
+#### Salidas
+* `Q_SHIFT`: Salida serie con el bit actual de datos que se está transmitiendo.
+
+#### Elementos internos
+* Circuito integrado **74HC165** (registro de desplazamiento de 8 bits Parallel-In / Serial-Out).
+* Lógica de control para la línea de carga paralela `SH_LD` = `LOAD_TX`.
+  
+#### Funcionamiento
+La línea de carga paralela se controla mediante `SH_LD` = `LOAD_TX`, y el reloj del registro se conecta directamente a `BAUD_TICK`, utilizando la inhibición de reloj controlada por `SHIFT_EN`. La salida serie se obtiene del pin $Q_H$.
+
+---
+
+### 5.2.7.4 Contador de bits
+
+#### Función
+Contar cuántos bits de datos se han transmitido (de 0 a 7) para permitir a la FSM realizar la transición del estado `DATA` hacia `STOP`.
+
+#### Entradas
+* `BAUD_TICK`: Reloj de transmisión que incrementa la cuenta en cada pulso activo.
+* `LOAD_TX`: Señal de la FSM utilizada para el reinicio del contador.
+
+#### Salidas
+* `BIT_COUNT[2:0]`: Bus de 3 bits que indica la cantidad actual de bits transmitidos.
+
+#### Elementos internos
+* Circuito integrado **74HC163** (contador síncrono de 4 bits), empleando únicamente sus tres bits inferiores ($Q_0$ a $Q_2$).
+
+#### Funcionamiento
+El clear síncrono `_CLR` se acciona mediante `LOAD_TX` para reiniciar la cuenta al arrancar cada trama, permitiendo llevar el control exacto de los 8 bits de datos transmitidos.
+
+---
+
+### 5.2.7.5 FSM de transmisión
+
+#### Función
+Gobernar la secuencia de estados `IDLE` $\rightarrow$ `START` $\rightarrow$ `DATA` $\rightarrow$ `STOP` y generar las señales de control de carga, desplazamiento y estado.
+
+#### Entradas
+* `INICIAR_TX`: Orden de inicio de transmisión proveniente del control de solicitud.
+* `BAUD_TICK`: Referencia temporal para las transiciones síncronas.
+* `BIT_COUNT[2:0]`: Estado actual del conteo de bits desde el contador.
+
+#### Salidas
+* `LOAD_TX`: Pulso de control para la carga en el registro.
+* `SHIFT_EN`: Habilitación de desplazamiento.
+* `ESTADO[1:0]`: Bits de codificación del estado actual ($E_1 E_0$).
+* `TX_BUSY`, `TX_LISTO`: Señales de estatus hacia el bloque de control.
+
+#### Elementos internos
+* Flip-flops tipo D (**74HC74**) para el almacenamiento de los bits de estado.
+* Compuertas lógicas combinacionales (**74HC08, 74HC32, 74HC04**) para la lógica de transiciones y salidas de Moore.
+
+#### Tabla de verdad simplificada de salidas por estado
+
+| `ESTADO[1:0]` | Estado | `UART_TX` (vía selector) | `LOAD\_TX` | `SHIFT\_EN` | `TX\_BUSY` | `TX\_LISTO` |
+|:---:|:---:|---|:---:|:---:|:---:|:---:|
+| 00 | `IDLE` | 1 | 0 | 0 | 0 | 1 |
+| 01 | `START` | 0 | 1 (pulso) | 0 | 1 | 0 |
+| 10 | `DATA` | `Q_SHIFT` | 0 | 1 | 1 | 0 |
+| 11 | `STOP` | 1 | 0 | 0 | 1 | 0 |
+
+#### Funcionamiento
+Opera como una máquina de Moore de 4 estados sincronizada por `BAUD_TICK`, evaluando las condiciones de entrada para avanzar entre `IDLE`, `START`, `DATA` y `STOP`, asegurando la temporización correcta de la trama serie.
+
+---
+
+### 5.2.7.6 Selector / lógica de salida UART_TX
+
+#### Función
+Multiplexar la señal de salida para fijar un `0` lógico durante el estado `START`, transmitir el flujo serie `Q_SHIFT` durante `DATA`, y mantener un nivel alto (`1`) en reposo (`IDLE` y `STOP`).
+
+#### Entradas
+* `ESTADO[1:0]`: Líneas de selección correspondientes a los bits de estado de la FSM.
+* `Q_SHIFT`: Flujo serie de datos proveniente del registro de desplazamiento.
+
+#### Salidas
+* `UART_TX`: Línea de salida serial definitiva que conecta con la FPGA.
+
+#### Elementos internos
+* Compuertas discretas básicas (**74HC08, 74HC32, 74HC04**) con mapas de Karnaugh, o multiplexor dedicado **74HC153** (MUX dual 4:1).
+
+#### Tabla de verdad del selector
+
+| $E_1$ | $E_0$ | Estado | `UART_TX` |
+|:---:|:---:|---|:---:|
+| 0 | 0 | `IDLE` | 1 |
+| 0 | 1 | `START` | 0 |
+| 1 | 0 | `DATA` | `Q_SHIFT` |
+| 1 | 1 | `STOP` | 1 |
+
+#### Funcionamiento
+Dependiendo del estado activo de la FSM codificado en `ESTADO[1:0]`, el selector conmuta su salida para entregar el nivel de voltaje adecuado (`0`, `1` o el flujo de datos `Q_SHIFT`) hacia la línea física `UART_TX`.
 
 ### 5.2.8 [Nombre del módulo]
 
