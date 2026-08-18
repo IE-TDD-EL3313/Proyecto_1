@@ -807,6 +807,169 @@ De esta manera, el Receptor UART convierte la información recibida serialmente 
 El **diagrama de bloques** representa la estructura interna del receptor y la comunicación entre sus componentes, mientras que el **diagrama de estados** representa la secuencia utilizada por la lógica de control para recibir correctamente cada trama.
 
 ---
+## 5.2 Subsistema Discreto
+
+El subsistema discreto se encarga de recibir las solicitudes provenientes de la FPGA, generar las posiciones pseudoaleatorias del topo, indicar visualmente la posición activa y realizar la comunicación de dicha información hacia la FPGA.
+
+### 5.2.1 Diagrama del subsistema discreto
+
+La siguiente figura muestra el diagrama de cuarto nivel correspondiente al subsistema discreto y las señales utilizadas para la comunicación entre sus diferentes módulos.
+
+![Diagrama de cuarto nivel del subsistema discreto](ruta_imagen_diagrama_general)
+
+---
+
+### 5.2.2 Control de solicitud
+
+#### Función
+
+Este módulo recibe la señal `solicitud` proveniente de la FPGA y genera un único `pulso` para actualizar el LFSR.
+
+Su función es evitar que una solicitud mantenida activa provoque múltiples cambios consecutivos en la posición generada.
+
+#### Entradas
+
+- `Solicitud Topo`: señal enviada por la FPGA para solicitar una nueva posición.
+- `clk`: señal de reloj utilizada por el flip-flop.
+
+#### Salidas
+
+- `Siguiente Topo`: pulso que provoca un único avance del LFSR.
+
+#### Elementos internos
+
+- Flip-flop tipo D.
+- Compuerta NOT.
+- Compuerta AND.
+
+#### Funcionamiento
+
+El flip-flop almacena el estado anterior de `Solicitud`. La compuerta NOT invierte este valor y la compuerta AND lo combina con la solicitud actual.
+
+De esta manera, se genera un único `Pulso` cada vez que se detecta una nueva solicitud.
+
+---
+
+### 5.2.3 Generador pseudoaleatorio LFSR
+
+#### Función
+
+Este módulo genera la secuencia pseudoaleatoria utilizada para seleccionar la posición del topo.
+
+Cada vez que recibe `Siguiente Topo`, el LFSR cambia a un nuevo estado. Mientras no se reciba otro pulso, la posición permanece estable.
+
+#### Entradas
+
+- `Siguiente Topo`: señal que hace avanzar el registro.
+- `SET`: señal utilizada para establecer la semilla inicial.
+- `RESET`: señal utilizada para inicializar los flip-flops.
+
+#### Salidas
+
+- `Q1`, `Q2`, `Q3` y `Q4`: estado interno del LFSR.
+- `posicion_topo[2:0]`: código de tres bits utilizado para seleccionar la posición del topo.
+
+La posición se obtiene mediante:
+
+`posicion_topo[2:0] = {Q1, Q2, Q4}`
+
+#### Elementos internos
+
+- Cuatro flip-flops tipo D.
+- Una compuerta XOR.
+- Red de realimentación.
+- Circuito de inicialización.
+
+#### Funcionamiento
+
+Los cuatro flip-flops forman un registro de desplazamiento. La compuerta XOR genera la realimentación necesaria para producir la secuencia pseudoaleatoria.
+
+La semilla inicial debe ser diferente de `0000` para evitar que el LFSR permanezca bloqueado.
+
+---
+
+### 5.2.4 Decodificador 3 a 8 e indicadores LED
+
+#### Función
+
+Este módulo convierte el código de tres bits generado por el LFSR en una de ocho posibles salidas.
+
+Cada salida corresponde a una posición del topo y controla uno de los ocho LEDs.
+
+#### Entradas
+
+- `Q1`: primer bit utilizado para determinar la posición.
+- `Q2`: segundo bit utilizado para determinar la posición.
+- `Q4`: tercer bit utilizado para determinar la posición.
+- Señales de habilitación del decodificador.
+
+#### Salidas
+
+- `Y0` a `Y7`: salidas del decodificador.
+- `LED0` a `LED7`: indicadores visuales de las ocho posiciones.
+
+#### Elementos internos
+
+- Decodificador `74HC138`.
+- Ocho LEDs.
+- Ocho resistencias limitadoras de corriente.
+
+#### Funcionamiento
+
+El `74HC138` recibe los tres bits provenientes del LFSR y selecciona una única salida entre ocho posibles.
+
+La salida seleccionada controla el LED correspondiente, mostrando visualmente la posición activa del topo.
+
+---
+
+### 5.2.5 Tablas de estado
+
+La siguiente figura presenta las tablas de estado correspondientes a los módulos secuenciales del subsistema discreto.
+
+![Tablas de estado del subsistema discreto](ruta_imagen_tablas_estado)
+
+---
+
+### 5.2.6 [Nombre del módulo]
+
+#### Función
+
+#### Entradas
+
+#### Salidas
+
+#### Elementos internos
+
+#### Funcionamiento
+
+---
+
+### 5.2.7 [Nombre del módulo]
+
+#### Función
+
+#### Entradas
+
+#### Salidas
+
+#### Elementos internos
+
+#### Funcionamiento
+
+---
+
+### 5.2.8 [Nombre del módulo]
+
+#### Función
+
+#### Entradas
+
+#### Salidas
+
+#### Elementos internos
+
+#### Funcionamiento
+
 
 # 6. Consideraciones de diseño
 
