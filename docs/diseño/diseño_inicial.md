@@ -1074,17 +1074,168 @@ Cada evento de `BAUD_TICK` sirve como referencia para avanzar al siguiente bit d
 ---
 
 
-### 5.2.7 [Nombre del módulo]
+### 5.2.7 Registro / Transmisión UART
 
 #### Función
+En esta sección se detalla el cuarto nivel del bloque **Registro / Transmisión UART** del subsistema discreto, el cual se encarga de convertir el byte de posición paralelo en una trama serie para enviarla hacia la FPGA.
+
+---
+
+### 5.2.7.1 Máquina de estados (FSM de transmisión)
+
+La FSM de transmisión es un **latch SR de 2 estados**, gobernado por `INICIAR_TX` (set) y por la combinación `BAUD_TICK · FIN_BYTE` (reset). Su función es coordinar el ciclo completo de la transmisión serial de la trama UART. Los estados `START` y `STOP` de versiones anteriores se fusionaron: `IDLE` y `STOP` producen la misma salida (`UART_TX=1`), por lo que se representan con un único estado de reposo.
+
+![Diagrama de estados de la FSM de transmisión](fig/diagrama_transiciones.png)
+
+**Figura 5.3.** Diagrama de estados de la FSM de transmisión UART (versión simplificada de 2 estados).
+
+#### Tabla de transición de la FSM
+
+| Estado actual ($E$) | Condición | Estado siguiente | Salidas activas |
+|---|---|---|---|
+| `E=0` (IDLE/STOP) | `INICIAR_TX=0` | `E=0` | `UART_TX=1`, `TX_LISTO=1`, `TX_BUSY=0` |
+| `E=0` (IDLE/STOP) | `INICIAR_TX=1` | `E=1` | `LOAD_TX=1` (pulso), `TX_BUSY=1` |
+| `E=1` (TX_ACTIVA) | `BAUD_TICK=1 · FIN_BYTE=0` | `E=1` | `SHIFT_EN=1`, `UART_TX` según selector |
+| `E=1` (TX_ACTIVA) | `BAUD_TICK=1 · FIN_BYTE=1` | `E=0` | `SHIFT_EN=0`, retorna a `UART_TX=1` |
+
+Para codificar los 2 estados se emplea 1 solo bit de estado ($E$): `0 = IDLE/STOP`, `1 = TX_ACTIVA`.
+
+---
+
+### 5.2.7.2 Interconexión de subbloques
+
+El bloque de Registro / Transmisión UART integra cuatro componentes principales: el registro de desplazamiento, el contador de anillo (con detección de fin de trama integrada), la FSM de transmisión (latch SR) y el selector de salida.
+
+![Esquemático de interconexiones del Registro / Transmisión UART](fig/diagrama_conex_sbloques.png)
+
+**Figura 5.4.** Diagrama de interconexiones del bloque Registro / Transmisión UART (versión simplificada).
+
+#### Tabla de dirección de señales (actualizada)
+
+| Señal | Origen | Destino |
+|---|---|---|
+| `DATO_TX[7:0]` | Preparación byte UART | Registro TX |
+| `INICIAR_TX` | Control de Solicitud | FSM (entrada Set) |
+| `BAUD_TICK` | Generador de Referencia Temporal | FSM, Contador de anillo |
+| `LOAD_TX` | FSM | Registro TX, Contador de anillo (CLR) |
+| `SHIFT_EN` | FSM | Registro TX, Contador de anillo (habilita reloj) |
+| `Q0` | Contador de anillo | Selector (detecta bit de start) |
+| `Q7` (= `FIN_BYTE`) | Contador de anillo | FSM (entrada Reset) |
+| `Q_SHIFT` | Registro TX | Selector |
+| `E`, `E̅` | FSM (latch) | Selector, señales de estatus |
+| `UART_TX` | Selector | FPGA (salida del bloque) |
+| `TX_BUSY` (= `E`), `TX_LISTO` (= `E̅`) | FSM | Control de Solicitud |
+
+---
+
+### 5.2.7.3 Registro de desplazamiento TX
+
+#### Función
+Cargar en paralelo el byte de datos `DATO_TX[7:0]` y entregarlo bit por bit (empezando por el LSB) en cada `BAUD_TICK` durante el estado `TX_ACTIVA`.
 
 #### Entradas
+* `DATO_TX[7:0]` (Paralelo): Byte de posición a transmitir.
+* `BAUD_TICK`: Señal de reloj de baudios que sincroniza el desplazamiento.
+* `LOAD_TX`: Señal proveniente de la FSM para habilitar la carga paralela.
+* `SHIFT_EN`: Señal de control para habilitar el desplazamiento de los bits.
 
 #### Salidas
+* `Q_SHIFT`: Salida serie con el bit actual de datos que se está transmitiendo.
 
 #### Elementos internos
+* Circuito integrado **74HC165** (registro de desplazamiento de 8 bits Parallel-In / Serial-Out).
+* Lógica de control para la línea de carga paralela `SH_LD` = `LOAD_TX`.
 
 #### Funcionamiento
+La línea de carga paralela se controla mediante `SH_LD` = `LOAD_TX`, y el reloj del registro se conecta directamente a `BAUD_TICK`, utilizando la inhibición de reloj controlada por `SHIFT_EN`. La salida serie se obtiene del pin $Q_H$.
+
+---
+
+### 5.2.7.4 Contador de anillo (fusiona Contador de bits y Detector de fin de trama)
+
+#### Función
+Contar los 8 pulsos de `BAUD_TICK` correspondientes a los 8 bits de datos y señalar el final de la trama sin necesitar una compuerta comparadora aparte, aprovechando el propio corrimiento de un "1" a través del registro.
+
+#### Entradas
+* `BAUD_TICK · SHIFT_EN`: Reloj efectivo del anillo (combinados con una compuerta AND antes de entrar al pin `CLK`).
+* `LOAD_TX`: Limpia el registro a `00000000` al iniciar cada trama (vía `CLR̄`, activo en bajo).
+* `SER A`, `SER B`: Ambas fijas a `VCC` (lógico `1` permanente).
+
+#### Salidas
+* `Q0`: `0` mientras no se ha desplazado ningún bit (justo tras el `CLR`); `1` de forma permanente desde el primer `BAUD_TICK` en adelante.
+* `Q7` (`FIN_BYTE`): `0` hasta que se cumplen 8 desplazamientos; `1` cuando el "1" que entró en el primer pulso llega a la última etapa, es decir, exactamente cuando ya se enviaron los 8 bits de datos.
+
+#### Elementos internos
+* Circuito integrado **74HC164** (registro de desplazamiento serie-entrada / paralelo-salida de 8 bits).
+* Compuerta AND (parte del `74HC00` compartido) para generar el reloj efectivo `BAUD_TICK · SHIFT_EN`.
+
+#### Funcionamiento
+Al limpiar el registro, todas las salidas están en `0`. Como la entrada serie está fija en `1`, cada flanco de reloj efectivo inyecta un nuevo `1` en `Q0` y empuja los bits existentes una posición a la derecha, generando un patrón de "unos que caminan". `Q0` identifica de forma única el instante justo antes del primer desplazamiento (el momento del bit de start), y `Q7` se vuelve `1` exactamente en el octavo pulso, sin necesidad de ninguna compuerta comparadora adicional.
+
+---
+
+### 5.2.7.5 FSM de transmisión (latch SR)
+
+#### Función
+Recordar si el bloque está en reposo (`E=0`) o transmitiendo (`E=1`), generando las señales de control de carga, desplazamiento y estado con el mínimo de compuertas posible.
+
+#### Entradas
+* `INICIAR_TX`: Orden de inicio de transmisión proveniente del control de solicitud (pone el latch en `E=1`).
+* `BAUD_TICK`, `FIN_BYTE` (`Q7`): Su combinación pone el latch en `E=0`.
+
+#### Salidas
+* `LOAD_TX`: Pulso de control generado en la transición `E: 0→1`.
+* `SHIFT_EN`: Habilitación de desplazamiento (`= E`).
+* `E`, `E̅`: Bits de estado (disponibles directamente del latch).
+* `TX_BUSY` (= `E`), `TX_LISTO` (= `E̅`): Señales de estatus hacia el bloque de control.
+
+#### Elementos internos
+* Un solo circuito integrado **74HC00** (4 compuertas NAND de 2 entradas): 2 NAND cruzadas forman el latch, 1 NAND como inversor de `INICIAR_TX` (genera `S̄`), y 1 NAND que combina `BAUD_TICK` y `FIN_BYTE` (genera `R̄`).
+
+#### Tabla de estado del latch
+
+| `S̄` (de `INICIAR_TX`) | `R̄` (de `BAUD_TICK·FIN_BYTE`) | `E` siguiente |
+|:---:|:---:|:---:|
+| 1 | 1 | Mantiene el valor anterior |
+| 0 | 1 | `1` (set) |
+| 1 | 0 | `0` (reset) |
+| 0 | 0 | No usado (condición prohibida del latch NAND) |
+
+#### Funcionamiento
+Es un latch SR clásico con entradas activas en bajo. `INICIAR_TX=1` genera un pulso en `S̄` que fuerza `E=1`. Mientras `E=1`, en cuanto coincidan `BAUD_TICK=1` y `FIN_BYTE=1`, se genera un pulso en `R̄` que regresa `E` a `0`. La condición prohibida (`S̄=R̄=0`) no ocurre en la práctica porque `INICIAR_TX` y `BAUD_TICK·FIN_BYTE` nunca son verdaderas al mismo tiempo: la primera solo puede darse en `E=0`, la segunda solo en `E=1`.
+
+---
+
+### 5.2.7.6 Selector / lógica de salida UART_TX
+
+#### Función
+Multiplexar la señal de salida para fijar un `0` lógico durante el bit de start, transmitir el flujo serie `Q_SHIFT` durante los bits de datos, y mantener un nivel alto (`1`) en reposo (`IDLE` y `STOP`).
+
+#### Entradas
+* `E`, `E̅`: Bits de estado provenientes de la FSM.
+* `Q0`: Señal del contador de anillo que indica si ya se desplazó al menos un bit.
+* `Q_SHIFT`: Flujo serie de datos proveniente del registro de desplazamiento.
+
+#### Salidas
+* `UART_TX`: Línea de salida serial definitiva que conecta con la FPGA.
+
+#### Elementos internos
+* Compuertas **74HC00** (red NAND-NAND), compartiendo empaque con la lógica de la FSM.
+
+#### Tabla de verdad del selector
+
+| `E` | `Q0` | `Q_SHIFT` | `UART_TX` |
+|:---:|:---:|:---:|:---:|
+| 0 | X | X | 1 |
+| 1 | 0 | X | 0 |
+| 1 | 1 | 0 | 0 |
+| 1 | 1 | 1 | 1 |
+
+#### Funcionamiento
+Cuando `E=0`, la salida queda forzada en `1` sin importar nada más. Cuando `E=1` y `Q0=0` (aún no hay ningún bit desplazado), la salida es `0` (bit de start). Cuando `E=1` y `Q0=1` (ya se desplazó al menos un bit), la salida sigue a `Q_SHIFT`. La expresión booleana resultante es:
+
+$$UART\_TX = \bar{E} + E \cdot Q_0 \cdot Q_{SHIFT}$$
+---
 
 ---
 
