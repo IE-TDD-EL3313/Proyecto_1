@@ -277,6 +277,7 @@ En el tercer nivel de diseño se realiza la descomposición interna de los subsi
 Para el presente proyecto, el subsistema implementado en la FPGA se divide en bloques encargados de la recepción de la posición del topo, acondicionamiento de los pulsadores, evaluación del golpe, temporización del turno, control de dificultad, conteo de resultados, visualización y control general de la secuencia del juego.
 
 ## 4.2 Subsistema Discreto
+![Diagrama de tercer nivel discreto](fig/IMG_5090_tercernivel_discreto.jpeg)
 
 #### 4.2.1 Bloque Oscilador Astable 555
 **Función:** Generar una señal de reloj continua y autónoma que sirve como base de tiempos para todo el subsistema discreto.
