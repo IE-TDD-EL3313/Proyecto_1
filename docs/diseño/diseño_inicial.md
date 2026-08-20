@@ -1076,7 +1076,7 @@ Cada evento de `BAUD_TICK` sirve como referencia para avanzar al siguiente bit d
 
 ### 5.2.7 [Preparación del byte UART ]
 
-### Función
+#### Función
 
 El bloque de preparación del byte UART tiene como función convertir la señal de posición del topo de 3 bits en un byte de datos de 8 bits.
 
@@ -1102,19 +1102,19 @@ DATA[7:0] = \{5'b00000,\ posicion\_topo[2:0]\}
 
 De esta forma, la posición del topo se transmite directamente utilizando los tres bits menos significativos del byte.
 
-### Entradas
+#### Entradas
 
 | Señal | Descripción |
 |---|---|
 | `posicion_topo[2:0]` | Código binario de 3 bits que representa la posición actual del topo. |
 
-### Salidas
+#### Salidas
 
 | Señal | Descripción |
 |---|---|
 | `DATA[7:0]` | Byte de datos de 8 bits preparado para ser utilizado en la trama UART. |
 
-### Asignación de bits
+#### Asignación de bits
 
 | Bit de salida | Valor |
 |---|---|
@@ -1127,7 +1127,7 @@ De esta forma, la posición del topo se transmite directamente utilizando los tr
 | `DATA[1]` | `posicion_topo[1]` |
 | `DATA[0]` | `posicion_topo[0]` |
 
-### Tabla de funcionamiento
+#### Tabla de funcionamiento
 
 | `posicion_topo[2:0]` | `DATA[7:0]` | Posición |
 |---|---|---|
@@ -1142,9 +1142,9 @@ De esta forma, la posición del topo se transmite directamente utilizando los tr
 
 ---
 
-## 5.2.8 Bloque: Empaquetado de trama UART
+### 5.2.8 Bloque: Empaquetado de trama UART
 
-### Función
+#### Función
 
 El bloque de empaquetado de trama UART tiene como función tomar el byte de datos `DATA[7:0]` y agregar los bits correspondientes al protocolo UART.
 
@@ -1180,7 +1180,7 @@ entonces:
 Trama[9:0] = \{1'b1,\ DATA[7:0],\ 1'b0\}
 \]
 
-### Entradas
+#### Entradas
 
 | Señal | Descripción |
 |---|---|
@@ -1188,13 +1188,13 @@ Trama[9:0] = \{1'b1,\ DATA[7:0],\ 1'b0\}
 | `START` | Bit de inicio de la comunicación UART, asignado a nivel lógico `0`. |
 | `STOP` | Bit de parada de la comunicación UART, asignado a nivel lógico `1`. |
 
-### Salidas
+#### Salidas
 
 | Señal | Descripción |
 |---|---|
 | `Trama[9:0]` | Trama UART completa de 10 bits formada por `START`, ocho bits de datos y `STOP`. |
 
-### Asignación de bits de la trama
+#### Asignación de bits de la trama
 
 | Posición en la trama | Contenido |
 |---|---|
