@@ -1074,21 +1074,144 @@ Cada evento de `BAUD_TICK` sirve como referencia para avanzar al siguiente bit d
 ---
 
 
-### 5.2.7 [Nombre del módulo]
+### 5.2.7 [Preparación del byte UART ]
 
-#### Función
+### Función
 
-#### Entradas
+El bloque de preparación del byte UART tiene como función convertir la señal de posición del topo de 3 bits en un byte de datos de 8 bits.
 
-#### Salidas
+La señal de entrada `posicion_topo[2:0]` representa una posición binaria entre 0 y 7. Esta información se coloca en los tres bits menos significativos del byte UART.
 
-#### Elementos internos
+Los cinco bits más significativos se asignan a nivel lógico `0`.
 
-#### Funcionamiento
+La asignación de bits se define como:
+
+\[
+DATA[7:3] = 00000
+\]
+
+\[
+DATA[2:0] = posicion\_topo[2:0]
+\]
+
+Por lo tanto, el byte completo se puede expresar como:
+
+\[
+DATA[7:0] = \{5'b00000,\ posicion\_topo[2:0]\}
+\]
+
+De esta forma, la posición del topo se transmite directamente utilizando los tres bits menos significativos del byte.
+
+### Entradas
+
+| Señal | Descripción |
+|---|---|
+| `posicion_topo[2:0]` | Código binario de 3 bits que representa la posición actual del topo. |
+
+### Salidas
+
+| Señal | Descripción |
+|---|---|
+| `DATA[7:0]` | Byte de datos de 8 bits preparado para ser utilizado en la trama UART. |
+
+### Asignación de bits
+
+| Bit de salida | Valor |
+|---|---|
+| `DATA[7]` | `0` |
+| `DATA[6]` | `0` |
+| `DATA[5]` | `0` |
+| `DATA[4]` | `0` |
+| `DATA[3]` | `0` |
+| `DATA[2]` | `posicion_topo[2]` |
+| `DATA[1]` | `posicion_topo[1]` |
+| `DATA[0]` | `posicion_topo[0]` |
+
+### Tabla de funcionamiento
+
+| `posicion_topo[2:0]` | `DATA[7:0]` | Posición |
+|---|---|---|
+| `000` | `00000000` | 0 |
+| `001` | `00000001` | 1 |
+| `010` | `00000010` | 2 |
+| `011` | `00000011` | 3 |
+| `100` | `00000100` | 4 |
+| `101` | `00000101` | 5 |
+| `110` | `00000110` | 6 |
+| `111` | `00000111` | 7 |
 
 ---
 
-### 5.2.8 [Nombre del módulo]
+## 5.2.8 Bloque: Empaquetado de trama UART
+
+### Función
+
+El bloque de empaquetado de trama UART tiene como función tomar el byte de datos `DATA[7:0]` y agregar los bits correspondientes al protocolo UART.
+
+Para la transmisión se utiliza una trama compuesta por:
+
+- Un bit de inicio o `START`.
+- Ocho bits de datos `DATA[7:0]`.
+- Un bit de parada o `STOP`.
+
+El bit de inicio se establece en nivel lógico `0`, mientras que el bit de parada se establece en nivel lógico `1`.
+
+La trama completa tiene un tamaño de 10 bits y se almacena en la señal `Trama[9:0]`.
+
+La asignación de la trama se define como:
+
+\[
+Trama[9:0] = \{STOP,\ DATA[7:0],\ START\}
+\]
+
+Como los valores de los bits de inicio y parada son constantes:
+
+\[
+START = 0
+\]
+
+\[
+STOP = 1
+\]
+
+entonces:
+
+\[
+Trama[9:0] = \{1'b1,\ DATA[7:0],\ 1'b0\}
+\]
+
+### Entradas
+
+| Señal | Descripción |
+|---|---|
+| `DATA[7:0]` | Byte de datos generado por el bloque de preparación del byte UART. |
+| `START` | Bit de inicio de la comunicación UART, asignado a nivel lógico `0`. |
+| `STOP` | Bit de parada de la comunicación UART, asignado a nivel lógico `1`. |
+
+### Salidas
+
+| Señal | Descripción |
+|---|---|
+| `Trama[9:0]` | Trama UART completa de 10 bits formada por `START`, ocho bits de datos y `STOP`. |
+
+### Asignación de bits de la trama
+
+| Posición en la trama | Contenido |
+|---|---|
+| `Trama[9]` | `STOP = 1` |
+| `Trama[8]` | `D7` |
+| `Trama[7]` | `D6` |
+| `Trama[6]` | `D5` |
+| `Trama[5]` | `D4` |
+| `Trama[4]` | `D3` |
+| `Trama[3]` | `D2` |
+| `Trama[2]` | `D1` |
+| `Trama[1]` | `D0` |
+| `Trama[0]` | `START = 0` |
+
+![Diagrama de cuarto nivel  preparacion byte uart y empaquetado uart](fig/Preparacion_del_byte_uart.jpeg)
+
+### 5.2.9 [Nombre del módulo]
 
 #### Función
 
