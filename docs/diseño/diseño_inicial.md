@@ -1267,88 +1267,123 @@ $$UART\_TX = \bar{E} + E \cdot Q_0 \cdot Q_{SHIFT}$$
 ---
 
 ---
+### 5.2.8 Preparación del byte y empaquetado de trama UART
 
-### 5.2.8 Bloque: Empaquetado de trama UART
+![Diagrama de cuarto nivel Preparación del byte y empaquetado de trama UART](fig/Preparacion_del_byte_uart.jpeg)
 
 #### Función
 
-El bloque de empaquetado de trama UART tiene como función tomar el byte de datos `DATA[7:0]` y agregar los bits correspondientes al protocolo UART.
+Este módulo tiene como función preparar la información correspondiente a la posición del topo para su posterior transmisión mediante el protocolo UART.
 
-Para la transmisión se utiliza una trama compuesta por:
+La entrada `posicion_topo[2:0]` contiene el valor binario de tres bits correspondiente a la posición generada por el subsistema pseudoaleatorio. Esta información se convierte en un byte de datos de 8 bits, denominado `DATA[7:0]`, colocando los tres bits de la posición en los tres bits menos significativos del byte y fijando los cinco bits más significativos en nivel lógico `0`.
 
-- Un bit de inicio o `START`.
-- Ocho bits de datos `DATA[7:0]`.
-- Un bit de parada o `STOP`.
+La estructura del byte de datos se define como:
 
-El bit de inicio se establece en nivel lógico `0`, mientras que el bit de parada se establece en nivel lógico `1`.
+    DATA[7:0] = 00000 posicion_topo[2:0]
 
-La trama completa tiene un tamaño de 10 bits y se almacena en la señal `Trama[9:0]`.
+Posteriormente, el byte de datos se empaqueta junto con los bits de inicio y parada para formar una trama UART de 10 bits. De acuerdo con el formato utilizado en el proyecto, la trama contiene un bit `START` en nivel lógico `0`, los ocho bits de datos y un bit `STOP` en nivel lógico `1`.
 
-La asignación de la trama se define como:
+La representación de la trama es:
 
-\[
-Trama[9:0] = \{STOP,\ DATA[7:0],\ START\}
-\]
+    Trama[9:0] = STOP | D7 | D6 | D5 | D4 | D3 | D2 | D1 | D0 | START
 
-Como los valores de los bits de inicio y parada son constantes:
+Por lo tanto:
 
-\[
-START = 0
-\]
+    Trama[9] = 1
+    Trama[8] = D7
+    Trama[7] = D6
+    Trama[6] = D5
+    Trama[5] = D4
+    Trama[4] = D3
+    Trama[3] = D2
+    Trama[2] = D1
+    Trama[1] = D0
+    Trama[0] = 0
 
-\[
-STOP = 1
-\]
-
-entonces:
-
-\[
-Trama[9:0] = \{1'b1,\ DATA[7:0],\ 1'b0\}
-\]
+La trama resultante queda preparada para ser transferida posteriormente al bloque de transmisión UART.
 
 #### Entradas
 
 | Señal | Descripción |
 |---|---|
-| `DATA[7:0]` | Byte de datos generado por el bloque de preparación del byte UART. |
-| `START` | Bit de inicio de la comunicación UART, asignado a nivel lógico `0`. |
-| `STOP` | Bit de parada de la comunicación UART, asignado a nivel lógico `1`. |
+| `posicion_topo[2:0]` | Código binario de tres bits correspondiente a la posición del topo generada por el LFSR. |
+| `nivel_logico_0` | Nivel lógico `0` utilizado para fijar los cinco bits superiores del byte y el bit de inicio. |
+| `nivel_logico_1` | Nivel lógico `1` utilizado para establecer el bit de parada. |
 
 #### Salidas
 
 | Señal | Descripción |
 |---|---|
-| `Trama[9:0]` | Trama UART completa de 10 bits formada por `START`, ocho bits de datos y `STOP`. |
-
-#### Asignación de bits de la trama
-
-| Posición en la trama | Contenido |
-|---|---|
-| `Trama[9]` | `STOP = 1` |
-| `Trama[8]` | `D7` |
-| `Trama[7]` | `D6` |
-| `Trama[6]` | `D5` |
-| `Trama[5]` | `D4` |
-| `Trama[4]` | `D3` |
-| `Trama[3]` | `D2` |
-| `Trama[2]` | `D1` |
-| `Trama[1]` | `D0` |
-| `Trama[0]` | `START = 0` |
-
-![Diagrama de cuarto nivel  preparacion byte uart y empaquetado uart](fig/Preparacion_del_byte_uart.jpeg)
-
-### 5.2.9 [Nombre del módulo]
-
-#### Función
-
-#### Entradas
-
-#### Salidas
+| `DATA[7:0]` | Byte de datos de ocho bits que contiene la posición del topo en sus tres bits menos significativos. |
+| `Trama[9:0]` | Trama UART completa formada por el bit de parada, los ocho bits de datos y el bit de inicio. |
 
 #### Elementos internos
 
+El módulo está compuesto principalmente por conexiones lógicas que permiten formar el byte de datos y posteriormente la trama UART.
+
+| Elemento | Función |
+|---|---|
+| Conexiones de posición | Asignan los bits de `posicion_topo[2:0]` a los bits `D2`, `D1` y `D0`. |
+| Nivel lógico `0` | Fija los bits `D7`, `D6`, `D5`, `D4` y `D3` en cero. También establece `START = 0`. |
+| Nivel lógico `1` | Establece el bit `STOP = 1`. |
+| Estructura de empaquetado | Agrupa el bit `START`, el byte `DATA[7:0]` y el bit `STOP` para formar `Trama[9:0]`. |
+
 #### Funcionamiento
 
+El funcionamiento del módulo comienza cuando se recibe una nueva señal `posicion_topo[2:0]` proveniente del bloque extractor de posición asociado al LFSR.
+
+Los tres bits recibidos se asignan directamente a los tres bits menos significativos del byte:
+
+    D2 = posicion_topo[2]
+    D1 = posicion_topo[1]
+    D0 = posicion_topo[0]
+
+Los cinco bits más significativos se mantienen permanentemente en nivel lógico `0`:
+
+    D7 = 0
+    D6 = 0
+    D5 = 0
+    D4 = 0
+    D3 = 0
+
+Por lo tanto, el byte generado es:
+
+    DATA[7:0] = 00000 P2 P1 P0
+
+donde:
+
+    P2 = posicion_topo[2]
+    P1 = posicion_topo[1]
+    P0 = posicion_topo[0]
+
+Una vez construido el byte, se agregan los bits correspondientes a la trama UART. El bit de inicio se establece en nivel lógico `0` y el bit de parada se establece en nivel lógico `1`.
+
+La trama completa queda:
+
+    STOP | D7 | D6 | D5 | D4 | D3 | D2 | D1 | D0 | START
+      1     0    0    0    0    0    P2   P1   P0    0
+
+En consecuencia:
+
+    Trama[9:0] = {1'b1, DATA[7:0], 1'b0}
+
+Por ejemplo, si:
+
+    posicion_topo[2:0] = 101
+
+el byte generado es:
+
+    DATA[7:0] = 00000101
+
+y la trama almacenada es:
+
+    Trama[9:0] = 1000001010
+
+La salida `Trama[9:0]` queda disponible para el siguiente bloque del subsistema, correspondiente a la transmisión UART.
+
+Durante la transmisión, los bits se enviarán en el siguiente orden temporal:
+
+    START → D0 → D1 → D2 → D3 → D4 → D5 → D6 → D7 → STOP
 
 # 6. Consideraciones de diseño
 
