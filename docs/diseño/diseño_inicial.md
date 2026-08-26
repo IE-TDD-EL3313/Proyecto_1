@@ -1134,11 +1134,39 @@ El bloque de Registro / Transmisión UART integra cuatro componentes principales
 #### Función
 Cargar en paralelo el byte de datos `DATO_TX[7:0]` y entregarlo bit por bit (empezando por el LSB) en cada `BAUD_TICK` durante el estado `TX_ACTIVA`.
 
+El bloque de preparación del byte UART tiene como función convertir la señal de posición del topo de 3 bits en un byte de datos de 8 bits.
+
+La señal de entrada `posicion_topo[2:0]` representa una posición binaria entre 0 y 7. Esta información se coloca en los tres bits menos significativos del byte UART.
+
+Los cinco bits más significativos se asignan a nivel lógico `0`.
+
+La asignación de bits se define como:
+
+\[
+DATA[7:3] = 00000
+\]
+
+\[
+DATA[2:0] = posicion\_topo[2:0]
+\]
+
+Por lo tanto, el byte completo se puede expresar como:
+
+\[
+DATA[7:0] = \{5'b00000,\ posicion\_topo[2:0]\}
+\]
+
+De esta forma, la posición del topo se transmite directamente utilizando los tres bits menos significativos del byte.
+
 #### Entradas
 * `DATO_TX[7:0]` (Paralelo): Byte de posición a transmitir.
 * `BAUD_TICK`: Señal de reloj de baudios que sincroniza el desplazamiento.
 * `LOAD_TX`: Señal proveniente de la FSM para habilitar la carga paralela.
 * `SHIFT_EN`: Señal de control para habilitar el desplazamiento de los bits.
+
+| Señal | Descripción |
+|---|---|
+| `posicion_topo[2:0]` | Código binario de 3 bits que representa la posición actual del topo. |
 
 #### Salidas
 * `Q_SHIFT`: Salida serie con el bit actual de datos que se está transmitiendo.
