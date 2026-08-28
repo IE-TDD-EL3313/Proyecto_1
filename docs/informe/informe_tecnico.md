@@ -473,12 +473,7 @@ AN2 → unidades de fallos
 AN3 → decenas de fallos
 ```
 
-Como existen cuatro dígitos, cada uno se actualiza una vez cada 4 ms:
-
-\[
-f_{\text{dígito}} =
-\frac{1}{4\text{ ms}} = 250\text{ Hz}
-\]
+Como existen cuatro dígitos, cada uno se actualiza una vez cada 4 ms.
 
 Los valores binarios de los contadores se convierten a decimal mediante división y módulo por diez:
 
@@ -487,37 +482,82 @@ unidades = valor % 10;
 decenas  = valor / 10;
 ```
 
-Posteriormente, un bloque `case` transforma cada dígito decimal en el patrón correspondiente de los segmentos A a G. El punto decimal permanece apagado y los cuatro displays no utilizados permanecen deshabilitados.
 ---
 
 ## 5. Metodología
 
 ### 5.1 Diseño modular
 
-[Explicar por qué se dividió el sistema en módulos independientes.]
+El sistema se desarrolló mediante una arquitectura modular, dividiendo el funcionamiento general en bloques con responsabilidades específicas. Esta organización permitió diseñar, simular y verificar cada parte de manera independiente antes de realizar la integración completa.
+
+Los principales bloques desarrollados fueron:
+
+- Generación de señales de habilitación temporal.
+- Sincronización de entradas externas.
+- Filtrado y detección de pulsos de los botones.
+- Recepción paralela de la posición del topo.
+- Generación de la señal `SOLICITUD_TOPO`.
+- Evaluación de aciertos y fallos.
+- Temporización de cada turno.
+- Control de dificultad.
+- Conteo de aciertos, fallos acumulados y fallos consecutivos.
+- Control de finalización de la partida.
+- Máquina de estados principal.
+- Control multiplexado de los displays de siete segmentos.
+- Indicadores visuales mediante LED.
+- Módulo superior de integración.
+
+La modularización facilitó la localización de errores, la reutilización de componentes y la creación de testbenches específicos. Además, permitió comprobar las interfaces entre módulos mediante señales claramente definidas, reduciendo la complejidad del proceso de integración.
 
 ### 5.2 Flujo de desarrollo
 
-1. Análisis de requisitos.
-2. Diagrama de bloques.
-3. Desarrollo de módulos.
-4. Creación de testbenches.
-5. Integración.
-6. Síntesis.
-7. Implementación.
-8. Generación del bitstream.
-9. Prueba física.
-10. Diagnóstico y correcciones.
+El desarrollo se realizó de forma incremental mediante las siguientes etapas:
+
+1. **Análisis de requisitos:** se estudiaron las especificaciones del instructivo, incluyendo número de posiciones, tiempos, dificultad, puntuación, condiciones de finalización y comunicación entre subsistemas.
+
+2. **Diseño del diagrama de bloques:** se definieron los subsistemas de lógica discreta y FPGA, junto con las señales necesarias para su comunicación.
+
+3. **Desarrollo de módulos:** cada función se implementó en un módulo independiente de SystemVerilog, utilizando parámetros cuando era necesario ajustar tiempos durante las simulaciones.
+
+4. **Creación de testbenches:** se elaboraron bancos de prueba para verificar individualmente el comportamiento de los módulos y sus condiciones límite.
+
+5. **Integración:** los módulos verificados se conectaron dentro de `whack_a_mole_top`, que representa el nivel superior del sistema.
+
+6. **Simulación integral:** se comprobó el funcionamiento completo del juego, incluyendo aciertos, fallos, reducción de tiempo, tres fallos consecutivos y finalización de la partida.
+
+7. **Síntesis:** se sintetizó el diseño para comprobar que el código fuera implementable en la FPGA y que no existieran errores de descripción de hardware.
+
+8. **Implementación:** se ejecutaron las etapas de optimización, colocación y enrutamiento para la FPGA Artix-7 de la tarjeta Nexys 4.
+
+9. **Generación del bitstream:** después de completar correctamente la implementación, se generó el archivo de configuración de la FPGA.
+
+10. **Prueba física:** se conectaron la tarjeta Nexys 4, la protoboard, los botones externos, el bus de posición y el circuito de solicitud. Se verificó el comportamiento mediante LED, displays y mediciones eléctricas.
+
+11. **Diagnóstico y correcciones:** los problemas encontrados se analizaron utilizando simulaciones, LED de depuración y mediciones con multímetro. Entre las correcciones realizadas estuvieron la adaptación de niveles eléctricos, el antirrebote de botones y el ajuste de la señal `SOLICITUD_TOPO`.
+
+Este procedimiento permitió avanzar desde pruebas unitarias hasta la validación física del sistema completo, conservando evidencia de los resultados obtenidos en cada etapa.
 
 ### 5.3 Herramientas
 
-- Vivado 2026.1.
-- SystemVerilog y XSim.
-- Git y GitHub.
-- Nexys 4.
-- Protoboard e integrados 74LS.
-- Multímetro.
-- Transistor 2N2222.
+Durante el desarrollo se utilizaron las siguientes herramientas:
+
+| Herramienta o componente | Uso dentro del proyecto |
+| ------------------------ | ----------------------- |
+| Vivado 2026.1 | Creación del proyecto, simulación, síntesis, implementación, generación del bitstream y programación de la FPGA. |
+| SystemVerilog | Descripción de los módulos digitales y elaboración de los testbenches. |
+| XSim | Simulación funcional y verificación de señales internas. |
+| Git | Control de versiones y registro incremental de los cambios realizados. |
+| GitHub | Almacenamiento remoto del repositorio y colaboración entre integrantes. |
+| Nexys 4 | Plataforma FPGA utilizada para implementar el control digital del juego. |
+| Protoboard | Construcción y conexión del subsistema de lógica discreta. |
+| Integrados 74LS | Implementación de registros, compuertas y decodificación en la sección discreta. |
+| 74LS138 | Decodificación de la posición binaria para activar uno de los ocho LED del topo. |
+| Multímetro | Medición de niveles de tensión y diagnóstico de conexiones. |
+| Transistor 2N2222 | Adaptación, aislamiento e inversión de la señal `SOLICITUD_TOPO`. |
+| Resistencias | Adaptación de niveles lógicos, polarización del transistor y generación de señales de pull-up o pull-down. |
+| LED y pulsadores | Representación de las posiciones del topo y generación de entradas del jugador. |
+
+La combinación de simulación, control de versiones y medición física permitió comparar el comportamiento esperado con el observado en el prototipo. Esto fue especialmente importante para distinguir errores de lógica digital, problemas de temporización y fallos de conexión eléctrica.
 
 ---
 
