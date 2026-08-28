@@ -1255,8 +1255,6 @@ Mide el intervalo de 2000 ms (parámetro `GAME_OVER_MS`) durante el cual el sist
 ---
 
 ### 7.13 `game_controller_fsm`
-
-![FSM principal](figuras/fsm_principal.png)
  
 Es el controlador central del juego: coordina la secuencia de un turno completo (solicitud de posición, espera de posición válida, inicio del turno, resolución de acierto o fallo) y gestiona la transición hacia la secuencia de fin de partida y el reinicio automático. Se implementa como una FSM de Moore de 9 estados, con un registro de estado y dos bloques combinacionales (siguiente estado y salidas):
 
@@ -1280,7 +1278,6 @@ Desde `ST_PLAY`, un acierto (`hit_pulse`) lleva a `ST_RESOLVE_HIT`, que siempre 
  
 Multiplexa en el tiempo los cuatro dígitos que muestran, de forma simultánea a la vista del usuario, los aciertos y los fallos acumulados (dos dígitos decimales cada uno). Un contador de 2 bits (`scan_index`), incrementado a 1 kHz mediante `ce_1ms`, selecciona cíclicamente el dígito activo; según el dígito, se calcula la unidad o decena correspondiente mediante módulo (`%`) y división entera (`/`) por 10 sobre `hits` o `misses`. El resultado se traduce a los patrones de segmentos mediante una tabla de decodificación activa en bajo, propia del hardware de la Nexys 4 (`seg[0]=A` … `seg[6]=G`). La salida `an[7:0]` se dimensionó según el ancho real del bus de ánodos de los ocho dígitos físicos de la tarjeta, aunque solo se controlan activamente los cuatro primeros; el punto decimal (`dp`) permanece apagado de forma permanente.
  
-Ver [`seven_segment_controller.sv`](./seven_segment_controller.sv).
  
 
 ### 7.15 `status_indicator`
@@ -2038,12 +2035,34 @@ Los resultados demuestran que la arquitectura modular de la FPGA funcionó corre
 Las dificultades principales aparecieron en la interacción entre dos tecnologías con características diferentes: lógica TTL de 5 V en protoboard y lógica LVCMOS de 3.3 V en la FPGA. Los problemas de nivel, temporización y reconocimiento de pulsos no siempre se manifestaron en simulación, porque los testbenches utilizan señales ideales.
 
 La prueba más importante para separar las posibles causas consistió en avanzar manualmente el LFSR mientras la FSM permanecía en `WAIT_POSITION`. Como el juego continuó sin perder el puntaje, se comprobó que la lógica principal de la FPGA seguía funcionando y que la detención se encontraba en la ruta de solicitud o en su reconocimiento por el circuito discreto.
-
-Por tanto, la implementación valida la mayor parte de la lógica funcional del proyecto, pero también demuestra la importancia de complementar la simulación digital con mediciones físicas. La principal mejora futura consiste en robustecer el LFSR y la interfaz de solicitud, además de completar la comunicación UART física requerida originalmente.
 ---
 
 ## 11. Conclusiones
 
-[Redactar conclusiones basadas directamente en objetivos y resultados. Incluir funcionamiento modular, verificación, implementación física, limitaciones del LFSR, consecuencias de sustituir UART y mejoras necesarias.]
+1. Se desarrolló un sistema digital modular para controlar un juego Whack-a-Mole utilizando una FPGA Nexys 4 y un subsistema de lógica discreta. La división en módulos independientes facilitó el diseño, la simulación, la integración y el diagnóstico de errores.
+
+2. La lógica implementada en la FPGA permitió recibir la posición del topo, filtrar los ocho botones externos, evaluar aciertos y fallos, controlar la ventana temporal de cada turno, modificar progresivamente la dificultad y mostrar los puntajes en los displays de siete segmentos.
+
+3. Los testbenches individuales permitieron verificar los módulos antes de realizar la integración. La simulación del módulo superior confirmó el conteo de aciertos y fallos, la reducción del tiempo por acierto, el reinicio de fallos consecutivos después de una respuesta correcta y la finalización de la partida después de tres fallos consecutivos.
+
+4. El diseño completó correctamente las etapas de síntesis, implementación y generación del bitstream en Vivado 2026.1. Las pruebas físicas confirmaron que la FPGA reconocía los botones, mostraba la posición recibida, actualizaba los puntajes y controlaba la secuencia general del juego.
+
+5. El uso de una señal de habilitación cada milisegundo permitió mantener todo el sistema dentro del dominio del reloj principal de 100 MHz. Esta decisión evitó generar relojes secundarios mediante lógica común y simplificó la sincronización de los módulos temporales.
+
+6. El LFSR discreto generó diferentes posiciones para el topo; sin embargo, presentó una limitación importante asociada al estado `000`. Este estado puede ser absorbente y mantener permanentemente activa la posición LED0. La solución recomendada consiste en cargar siempre una semilla no nula y detectar automáticamente `000` para sustituirlo por un estado válido.
+
+7. La detención observada en LED1 no correspondió necesariamente a un estado prohibido del LFSR. Los LED de diagnóstico mostraron que la FPGA permanecía en `WAIT_POSITION`, y al aplicar una solicitud manual el juego continuaba sin perder el puntaje. Esto indicó que el problema estaba relacionado principalmente con el reconocimiento físico de `SOLICITUD_TOPO`.
+
+8. Se desarrollaron y simularon módulos para la recepción UART 8N1. Las simulaciones demostraron la recepción correcta de diferentes bytes bajo condiciones ideales. No obstante, la comunicación UART no presentó un funcionamiento físico suficientemente estable durante la integración entre la lógica discreta y la FPGA.
+
+9. Para completar el funcionamiento del prototipo, la comunicación UART fue sustituida por un bus paralelo de tres bits `Q[2:0]`. Esta modificación facilitó la integración y permitió demostrar las funciones principales del juego, pero constituye una desviación explícita del requisito de comunicación establecido en el instructivo y puede afectar la evaluación correspondiente a este apartado.
+
+10. La integración de circuitos TTL alimentados con 5 V y una FPGA con entradas de 3.3 V requirió medidas de protección. Los divisores resistivos, la tierra común y el transistor 2N2222 permitieron adaptar las señales y evitar la aplicación directa de tensiones inseguras sobre los pines Pmod.
+
+11. Los LED de diagnóstico resultaron fundamentales durante las pruebas físicas. Mediante ellos fue posible distinguir entre un bloqueo de la FPGA, una espera válida de la máquina de estados y una solicitud no reconocida por el circuito discreto.
+
+12. Como mejoras futuras se propone corregir definitivamente la secuencia del LFSR, incorporar recuperación automática del estado `000`, robustecer la detección de `SOLICITUD_TOPO`, medir las señales con osciloscopio o analizador lógico y completar la comunicación UART física conforme al protocolo requerido.
+
+En términos generales, el proyecto permitió aplicar conceptos de lógica combinacional y secuencial, registros, LFSR, máquinas de estados, sincronización, antirrebote, temporización, comunicación digital y multiplexación de displays. Aunque permanecieron limitaciones en el LFSR y en la comunicación UART, la implementación obtenida demostró el funcionamiento modular de la FPGA y permitió identificar con evidencia las mejoras necesarias para alcanzar el cumplimiento completo de las especificaciones.
 
 ---
