@@ -852,11 +852,279 @@ En consecuencia, `ce_1ms_generator` proporciona una referencia temporal común, 
 
 ### 7.2 `sync_2ff`
 
-[Función, metastabilidad y latencia.]
+El módulo `sync_2ff` sincroniza señales externas que no están alineadas con el reloj de la FPGA. Se utiliza antes de procesar señales provenientes de los botones y del bus paralelo `Q[2:0]`.
+
+Las entradas externas pueden cambiar en cualquier instante, incluso cerca de un flanco ascendente de `clk`. Si esto ocurre, el flip-flop que recibe la señal puede incumplir sus tiempos de establecimiento o retención y entrar temporalmente en metastabilidad.
+
+#### Interfaz del módulo
+
+| Señal | Dirección | Descripción |
+| ----- | :-------: | ----------- |
+| `clk` | Entrada | Reloj principal de la FPGA. |
+| `reset` | Entrada | Reset síncrono activo en alto. |
+| `async_in` | Entrada | Vector de señales externas asíncronas. |
+| `sync_out` | Salida | Vector sincronizado con el reloj de la FPGA. |
+
+El módulo posee el siguiente parámetro:
+
+| Parámetro | Valor predeterminado | Descripción |
+| --------- | -------------------: | ----------- |
+| `WIDTH` | `1` | Cantidad de señales sincronizadas en paralelo. |
+
+La parametrización permite utilizar el mismo módulo para una señal individual o para un vector. Por ejemplo, puede configurarse con `WIDTH = 8` para sincronizar los ocho botones externos.
+
+#### Metastabilidad
+
+La metastabilidad ocurre cuando una entrada cambia demasiado cerca del flanco de reloj. En esta condición, la salida del flip-flop puede tardar un tiempo indeterminado en establecerse en cero o uno.
+
+El sincronizador utiliza dos registros conectados en serie:
+
+```text
+Señal asíncrona -> Primera etapa -> Segunda etapa -> Lógica del sistema
+                    meta_stage       sync_out
+```
+
+La primera etapa, `meta_stage`, es la que recibe directamente la entrada asíncrona y puede entrar en metastabilidad. La segunda etapa recibe el valor de la primera un ciclo después, proporcionando tiempo adicional para que la señal se estabilice antes de ser utilizada por el resto del sistema.
+
+Su operación está descrita mediante:
+
+```systemverilog
+meta_stage <= async_in;
+sync_out   <= meta_stage;
+```
+
+Debido al uso de asignaciones no bloqueantes, `sync_out` recibe el valor anterior de `meta_stage`. Por tanto, Vivado infiere dos etapas reales de registros y no una conexión combinacional.
+
+El sincronizador reduce considerablemente la probabilidad de que la metastabilidad se propague, pero no la elimina matemáticamente. Su objetivo es hacer que dicha probabilidad sea suficientemente pequeña para la operación normal del sistema.
+
+#### Latencia
+
+Una transición de `async_in` necesita normalmente dos flancos ascendentes para aparecer en `sync_out`:
+
+```text
+Flanco 1: meta_stage captura async_in
+Flanco 2: sync_out captura meta_stage
+```
+
+Con un reloj de 100 MHz, cada periodo dura 10 ns. Por tanto, la latencia nominal introducida por las dos etapas es aproximadamente:
+
+```text
+Latencia nominal = 2 × 10 ns = 20 ns
+```
+
+Dependiendo del instante exacto en que cambie la señal externa respecto al reloj, la latencia observable puede variar aproximadamente entre uno y dos periodos antes de quedar disponible de forma sincronizada.
+
+Esta latencia es despreciable en comparación con los tiempos humanos de los botones y con las ventanas del juego, medidas en milisegundos.
+
+#### Comportamiento del reset
+
+Cuando se activa `reset`, ambas etapas se limpian:
+
+```systemverilog
+meta_stage <= '0;
+sync_out   <= '0;
+```
+
+Esto proporciona un estado inicial conocido y evita que el resto del sistema interprete una entrada activa durante el reinicio.
+
+#### Consideraciones para buses de varios bits
+
+El parámetro `WIDTH` permite sincronizar varios bits al mismo tiempo. Sin embargo, sincronizar cada bit de un bus mediante dos flip-flops no garantiza que todos representen exactamente la misma palabra durante una transición. Algunos bits pueden estabilizarse un ciclo antes que otros.
+
+Por esta razón, en el bus `Q[2:0]` el sincronizador se complementa con una validación temporal en `parallel_position_receiver`. La posición solamente se acepta después de permanecer estable durante el intervalo requerido.
+
+#### Decisiones de diseño
+
+Se seleccionó un sincronizador de dos etapas porque:
+
+- Reduce el riesgo de propagación de metastabilidad.
+- Mantiene las señales dentro del dominio de reloj de 100 MHz.
+- Es una estructura sencilla y ampliamente utilizada para entradas asíncronas.
+- Puede reutilizarse con diferentes anchos mediante `WIDTH`.
+- Introduce una latencia muy pequeña respecto a los tiempos del juego.
+
+En resumen:
+
+```text
+Entrada asíncrona
+        |
+        v
+Primera etapa: posible metastabilidad
+        |
+        v
+Segunda etapa: señal sincronizada
+        |
+        v
+Lógica interna de la FPGA
+```
+
+---
 
 ### 7.3 `button_debouncer`
 
-[Función y validación temporal.]
+El módulo `button_debouncer` elimina las transiciones falsas producidas por el rebote mecánico de un pulsador. Recibe una señal previamente sincronizada y solamente actualiza su salida cuando detecta un nuevo nivel estable durante un número determinado de milisegundos.
+
+Un botón real no cambia instantáneamente entre cero y uno. Sus contactos pueden abrirse y cerrarse varias veces durante una sola pulsación:
+
+```text
+Señal ideal:  0 0 0 0 1 1 1 1 1
+Señal real:   0 0 1 0 1 0 1 1 1
+```
+
+Sin antirrebote, estas transiciones podrían interpretarse como varias pulsaciones.
+
+#### Interfaz del módulo
+
+| Señal | Dirección | Descripción |
+| ----- | :-------: | ----------- |
+| `clk` | Entrada | Reloj principal de 100 MHz. |
+| `reset` | Entrada | Reset síncrono activo en alto. |
+| `ce_1ms` | Entrada | Habilitación de un ciclo cada milisegundo. |
+| `button_sync` | Entrada | Estado del botón después del sincronizador de dos etapas. |
+| `button_level` | Salida | Nivel estable y filtrado del botón. |
+
+El módulo incluye el siguiente parámetro:
+
+| Parámetro | Valor predeterminado | Descripción |
+| --------- | -------------------: | ----------- |
+| `DEBOUNCE_MS` | `10` | Cantidad de muestras consecutivas necesarias para aceptar un cambio. |
+
+#### Validación temporal
+
+El módulo observa `button_sync` únicamente cuando `ce_1ms` está activo. Por tanto, realiza una muestra cada milisegundo.
+
+Si la entrada es igual al nivel filtrado actual, no existe un cambio pendiente y el contador regresa a cero:
+
+```systemverilog
+if (button_sync == button_level)
+    stable_counter <= '0;
+```
+
+Si la entrada es diferente de `button_level`, el módulo comienza a contar muestras consecutivas. Cuando la diferencia se mantiene durante `DEBOUNCE_MS` muestras, el nuevo nivel se acepta:
+
+```systemverilog
+button_level   <= button_sync;
+stable_counter <= '0;
+```
+
+Con el parámetro predeterminado:
+
+```text
+Periodo de muestreo = 1 ms
+Muestras requeridas = 10
+Tiempo de validación ≈ 10 ms
+```
+
+La secuencia puede representarse así:
+
+```text
+Tiempo:           0  1  2  3  4  5  6  7  8  9 ms
+button_sync:      1  1  1  1  1  1  1  1  1  1
+stable_counter:   1  2  3  4  5  6  7  8  9  valida
+button_level:     0  0  0  0  0  0  0  0  0  1
+```
+
+Si durante el conteo la entrada regresa al nivel anterior, el cambio se considera rebote y el contador se reinicia:
+
+```text
+button_sync:      1  1  0
+stable_counter:   1  2  0
+button_level:     0  0  0
+```
+
+El mismo procedimiento se utiliza para validar tanto la pulsación como la liberación del botón.
+
+#### Ancho del contador
+
+El ancho del contador se calcula mediante:
+
+```systemverilog
+COUNTER_WIDTH =
+    (DEBOUNCE_MS <= 1) ? 1 : $clog2(DEBOUNCE_MS);
+```
+
+Para `DEBOUNCE_MS = 10`:
+
+```text
+COUNTER_WIDTH = ceil(log2(10)) = 4 bits
+```
+
+Un contador de cuatro bits puede representar valores de 0 a 15, por lo que es suficiente para contar las muestras requeridas.
+
+La condición especial garantiza un ancho mínimo de un bit cuando `DEBOUNCE_MS` se configura con un valor igual o inferior a uno.
+
+#### Nivel filtrado y pulso de pulsación
+
+La salida `button_level` representa el nivel estable del botón. No es por sí misma un pulso de un solo ciclo. Si el usuario mantiene presionado el botón, `button_level` permanece activo hasta que la liberación también sea validada.
+
+La generación del pulso único se realiza posteriormente en `button_bank`, mediante la detección del flanco ascendente del nivel filtrado:
+
+```text
+button_sync -> button_debouncer -> button_level -> detección de flanco
+                                                        |
+                                                        v
+                                            Pulso de un solo ciclo
+```
+
+Esta separación permite que `button_debouncer` se encargue únicamente de validar estabilidad, mientras que `button_bank` interpreta el cambio como una pulsación.
+
+#### Comportamiento del reset
+
+Durante el reset:
+
+```systemverilog
+stable_counter <= '0;
+button_level   <= 1'b0;
+```
+
+Así, el sistema considera inicialmente que el botón se encuentra liberado. Después del reset, cualquier nivel alto debe permanecer estable durante el tiempo de antirrebote antes de ser aceptado.
+
+#### Latencia introducida
+
+El filtrado introduce una latencia intencional cercana a 10 ms. A esta se agrega la pequeña latencia del sincronizador de dos etapas.
+
+De forma aproximada:
+
+```text
+Latencia total ≈ latencia de sincronización + validación temporal
+               ≈ 20 ns + 10 ms
+               ≈ 10 ms
+```
+
+Para una entrada humana, esta demora no es perceptible y evita que una pulsación genere múltiples eventos.
+
+#### Decisiones de diseño
+
+Las principales decisiones fueron:
+
+- Sincronizar la entrada antes de aplicar el antirrebote.
+- Muestrear cada 1 ms en lugar de contar directamente ciclos de 100 MHz.
+- Exigir 10 muestras consecutivas iguales.
+- Validar tanto la pulsación como la liberación.
+- Mantener un único dominio de reloj.
+- Parametrizar el tiempo mediante `DEBOUNCE_MS`.
+- Separar el nivel filtrado de la generación del pulso único.
+
+El comportamiento general puede resumirse así:
+
+```text
+Botón externo
+      |
+      v
+Sincronizador de dos etapas
+      |
+      v
+Muestreo cada 1 ms
+      |
+      v
+¿Cambió durante 10 muestras consecutivas?
+       /                          \
+     No                            Sí
+     |                              |
+Reiniciar conteo             Aceptar nuevo nivel
+```
+
+En consecuencia, `button_debouncer` garantiza que el sistema responda una sola vez a una pulsación física estable y rechace las transiciones breves causadas por el rebote mecánico.
 
 ### 7.4 `button_bank`
 
