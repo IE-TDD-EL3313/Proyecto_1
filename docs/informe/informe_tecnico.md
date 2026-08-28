@@ -296,16 +296,44 @@ SOLICITUD ───── colector
 [Aciertos, fallos acumulados y saturación en 99.]
 
 ### 8.11 `consecutive_misses`
-
-[Tres fallos consecutivos y reinicio mediante acierto.]
-
+ 
+Lleva la cuenta de los fallos consecutivos del jugador, a diferencia del contador de fallos acumulados (8.10), que nunca se reinicia durante la partida. Un acierto (`hit_pulse`) tiene prioridad y reinicia el contador `miss_count` a cero; un fallo (`miss_pulse`) lo incrementa mientras no haya alcanzado 3. El módulo entrega dos salidas distintas: `three_misses`, una señal de nivel combinacional que permanece en alto mientras el contador esté en 3, y `third_miss_pulse`, un pulso registrado de un solo ciclo generado exactamente en el instante en que se completa el tercer fallo. Esta separación es necesaria porque `game_controller_fsm` (8.13) requiere un evento de un ciclo para disparar la transición hacia el estado de game over, evitando ambigüedades que produciría una señal de nivel.
+ 
+| Señal | Dirección | Descripción |
+|---|---|---|
+| `clk`, `reset` | Entrada | Reloj y reinicio síncrono. |
+| `hit_pulse` | Entrada | Pulso de acierto; reinicia el contador. |
+| `miss_pulse` | Entrada | Pulso de fallo; incrementa el contador. |
+| `miss_count[1:0]` | Salida | Valor actual del contador (0–3). |
+| `three_misses` | Salida | Nivel alto mientras el contador esté en 3. |
+| `third_miss_pulse` | Salida | Pulso de un ciclo al completarse el tercer fallo. |
+ 
+Ver [`consecutive_misses.sv`](./consecutive_misses.sv).
+ 
+---
+ 
 ### 8.12 `game_over_timer`
-
-[Duración de 2000 ms y pulso de finalización.]
+ 
+Mide el intervalo de 2000 ms (parámetro `GAME_OVER_MS`) durante el cual el sistema permanece en la pantalla de fin de partida antes de reiniciarse automáticamente. Su estructura reutiliza el mismo principio que `turn_window_timer` (8.8): un contador impulsado por la habilitación temporal `ce_1ms` en lugar de un reloj independiente, con ancho dimensionado automáticamente mediante `$clog2(GAME_OVER_MS)` para que el módulo sea reutilizable ante otros valores del parámetro. Al recibir `start` (proveniente de `game_over_start` en la FSM), el contador arranca y `active` se activa; al cumplirse el tiempo configurado, se genera `done_pulse` durante un ciclo, que la FSM utiliza como `game_over_done` para avanzar hacia el reinicio automático.
+ 
+| Señal | Dirección | Descripción |
+|---|---|---|
+| `GAME_OVER_MS` | Parámetro | Duración en milisegundos (2000 por defecto). |
+| `clk`, `reset` | Entrada | Reloj y reinicio síncrono. |
+| `ce_1ms` | Entrada | Habilitación temporal de 1 ms. |
+| `start` | Entrada | Arranca el temporizador. |
+| `active` | Salida | Indica que el temporizador está en curso. |
+| `done_pulse` | Salida | Pulso de un ciclo al cumplirse el tiempo. |
+ 
+Ver [`game_over_timer.sv`](./game_over_timer.sv).
+ 
+---
 
 ### 8.13 `game_controller_fsm`
 
 ![FSM principal](figuras/fsm_principal.png)
+ 
+Es el controlador central del juego: coordina la secuencia de un turno completo (solicitud de posición, espera de posición válida, inicio del turno, resolución de acierto o fallo) y gestiona la transición hacia la secuencia de fin de partida y el reinicio automático. Se implementa como una FSM de Moore de 9 estados, con un registro de estado y dos bloques combinacionales (siguiente estado y salidas):
 
 | Estado | Función |
 |---|---|
@@ -319,9 +347,17 @@ SOLICITUD ───── colector
 | `ST_GAME_OVER_WAIT` | Espera dos segundos |
 | `ST_AUTO_RESET` | Reinicia datos |
 
+Desde `ST_PLAY`, un acierto (`hit_pulse`) lleva a `ST_RESOLVE_HIT`, que siempre regresa a `ST_REQUEST_START`; un fallo o un `timeout_pulse` llevan a `ST_RESOLVE_MISS`. Ahí se evalúa `third_miss_pulse` (proveniente de 8.11): si no se han acumulado tres fallos consecutivos, la partida continúa; si se cumple la condición, la FSM entra en `ST_GAME_OVER_START → ST_GAME_OVER_WAIT`, donde permanece hasta que `game_over_done` (proveniente de 8.12) indique su finalización. `ST_AUTO_RESET` activa `game_data_reset` para limpiar los contadores de la partida antes de reiniciar el ciclo automáticamente, sin intervención del jugador. La salida `state_debug[3:0]` expone el estado actual únicamente con fines de depuración.
+ 
+Ver [`game_controller_fsm.sv`](./game_controller_fsm.sv).
+ 
+---
 ### 8.14 `seven_segment_controller`
-
-[Barrido, selección de dígitos y patrones de segmentos.]
+ 
+Multiplexa en el tiempo los cuatro dígitos que muestran, de forma simultánea a la vista del usuario, los aciertos y los fallos acumulados (dos dígitos decimales cada uno). Un contador de 2 bits (`scan_index`), incrementado a 1 kHz mediante `ce_1ms`, selecciona cíclicamente el dígito activo; según el dígito, se calcula la unidad o decena correspondiente mediante módulo (`%`) y división entera (`/`) por 10 sobre `hits` o `misses`. El resultado se traduce a los patrones de segmentos mediante una tabla de decodificación activa en bajo, propia del hardware de la Nexys 4 (`seg[0]=A` … `seg[6]=G`). La salida `an[7:0]` se dimensionó según el ancho real del bus de ánodos de los ocho dígitos físicos de la tarjeta, aunque solo se controlan activamente los cuatro primeros; el punto decimal (`dp`) permanece apagado de forma permanente.
+ 
+Ver [`seven_segment_controller.sv`](./seven_segment_controller.sv).
+ 
 
 ### 8.15 `status_indicator`
 
