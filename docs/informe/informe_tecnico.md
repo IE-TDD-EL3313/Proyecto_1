@@ -2,10 +2,8 @@
 # Informe técnico: Whack-a-Mole con lógica discreta y FPGA
 
 ## Resumen
-
-[COMPLETAR EN 150-250 PALABRAS]
-
-Resumir el objetivo, la división entre lógica discreta y FPGA, el método de generación de posición, el control del juego, la comunicación utilizada, los resultados principales, las dificultades y la conclusión más importante.
+Este proyecto presenta el diseño e implementación de un juego electrónico Whack-a-Mole mediante la integración de lógica discreta y una FPGA Nexys 4. El subsistema discreto, construido con integrados de la familia 74LS, utiliza un registro de desplazamiento con realimentación lineal (LFSR) para generar la posición pseudoaleatoria del topo y un decodificador 74LS138 para representarla en uno de ocho LEDs. La FPGA concentra el control del juego mediante una arquitectura modular desarrollada en SystemVerilog, incluyendo sincronización y antirrebote de ocho botones externos, temporización de los turnos, evaluación de golpes, dificultad progresiva, conteo de aciertos y fallos, control de vidas y visualización en displays de siete segmentos.
+Aunque el planteamiento original especificaba una comunicación UART 8N1, las dificultades encontradas durante su integración llevaron a implementar temporalmente un enlace paralelo de tres bits para transmitir la posición. Las diferencias de voltaje entre ambos subsistemas se resolvieron mediante divisores resistivos y un transistor 2N2222 para la señal de solicitud. Los módulos de la FPGA fueron verificados mediante testbenches autoverificables, y la integración superó las pruebas de aciertos, fallos, timeout, dificultad, fin de partida y reinicio automático. La implementación demostró el funcionamiento general del juego, aunque se identificaron limitaciones en el LFSR discreto y en la confiabilidad de algunas solicitudes.
 
 ---
 
@@ -13,20 +11,14 @@ Resumir el objetivo, la división entre lógica discreta y FPGA, el método de g
 
 ### 1.1 Contexto
 
-[Explicar en qué consiste Whack-a-Mole y el problema planteado por el instructivo.]
+Whack-a-Mole es un juego en el que se activa aleatoriamente una de varias posiciones y el jugador debe presionar el botón correspondiente antes de que finalice un tiempo determinado. El proyecto solicita dividir el sistema en dos subsistemas: un circuito discreto encargado de generar y mostrar la posición pseudoaleatoria del topo, y una FPGA responsable del control de turnos, botones, puntajes, dificultad y visualización. La comunicación especificada originalmente entre ambos subsistemas corresponde a un enlace UART asíncrono 8N1.
 
 ### 1.2 Solución desarrollada
 
-[Resumir la arquitectura implementada y la responsabilidad de cada subsistema.]
+El circuito discreto utiliza un LFSR para generar una posición de tres bits y un 74LS138 para activar uno de ocho LEDs. La FPGA recibe la posición, solicita nuevos topos, filtra las señales de ocho botones externos y controla el juego mediante una máquina de estados. Además, implementa la ventana temporal, dificultad progresiva, conteo de aciertos y fallos, tres oportunidades consecutivas, estado de fin de partida y cuatro displays de siete segmentos.
 
 ### 1.3 Alcance y limitaciones
-
-Indicar claramente:
-
-- Partes implementadas completamente.
-- Partes modificadas respecto al instructivo.
-- Sustitución de UART por el bus paralelo `Q[2:0]`.
-- Limitaciones y bloqueos observados en el LFSR.
+Se implementaron y verificaron completamente los módulos principales de control de la FPGA mediante testbenches autoverificables. Debido a problemas de estabilidad durante la integración UART, la posición se transmitió finalmente mediante el bus paralelo `Q[2:0]`. Esta modificación permitió obtener una integración funcional, pero no cumple el enlace serial solicitado originalmente. También se observaron bloqueos en ciertas posiciones del LFSR, especialmente en el estado 000, que requiere una semilla no nula o una corrección de la lógica de realimentación. Asimismo, algunas solicitudes no fueron reconocidas correctamente por el circuito discreto, por lo que se incorporaron mecanismos de diagnóstico y control de pulsos.
 
 ---
 
@@ -56,61 +48,155 @@ Diseñar e implementar un juego Whack-a-Mole utilizando un subsistema de lógica
 
 ### 3.1 Requisitos funcionales
 
+La siguiente tabla compara los requisitos establecidos en el instructivo con la implementación final del sistema.
+
 | Requisito | Valor especificado | Implementación final |
 |---|---:|---|
-| Posiciones | 8 | [COMPLETAR] |
-| Botones externos | 8 | [COMPLETAR] |
-| Tiempo inicial | 1500 ms | [COMPLETAR] |
-| Reducción por acierto | 100 ms | [COMPLETAR] |
-| Tiempo mínimo | 500 ms | [COMPLETAR] |
-| Fallos consecutivos | 3 | [COMPLETAR] |
-| Game over | 2000 ms | [COMPLETAR] |
-| Aciertos | 00-99 | [COMPLETAR] |
-| Fallos acumulados | 00-99 | [COMPLETAR] |
-| Reloj FPGA | 100 MHz | [COMPLETAR] |
-| Comunicación requerida | UART 8N1 | Paralelo `Q[2:0]`; justificar |
+| Posiciones del topo | 8 | Ocho posiciones codificadas mediante `Q[2:0]` y representadas en los LEDs `LD0–LD7` |
+| Botones externos | 8 | Ocho pulsadores conectados al Pmod JB, sincronizados y filtrados contra rebotes |
+| Tiempo inicial | 1500 ms | Ventana inicial de 1500 ms controlada por `turn_window_timer` |
+| Reducción por acierto | 100 ms | Reducción de 100 ms después de cada acierto |
+| Tiempo mínimo | 500 ms | Saturación de la ventana temporal en 500 ms |
+| Fallos consecutivos | 3 | La partida termina después del tercer fallo consecutivo |
+| Game over | 2000 ms | Estado de fin de partida durante 2000 ms, seguido de reinicio automático |
+| Aciertos | 00–99 | Contador acumulado saturado en 99 y mostrado en dos dígitos |
+| Fallos acumulados | 00–99 | Contador acumulado saturado en 99 y mostrado en dos dígitos |
+| Reloj de la FPGA | 100 MHz | Reloj principal de 100 MHz de la Nexys 4 |
+| Base temporal | 1 ms | Clock enable de un ciclo cada 100 000 ciclos de reloj |
+| Indicador de estado | Partida activa/finalizada | `LD15` fijo durante la partida y parpadeante durante game over |
+| Comunicación requerida | UART asíncrono 8N1 | Sustituida durante la integración por un enlace paralelo `Q[2:0]` |
+| Solicitud de nuevo topo | Un pulso por turno | Pulso de 500 ms enviado por JA4 mediante un transistor 2N2222 |
+| Reset general | Botón central | `BTNC` reinicia puntajes, fallos consecutivos, dificultad y secuencia de control |
+
+La comunicación paralela fue utilizada debido a problemas de estabilidad encontrados durante la integración del enlace UART. Esta adaptación permitió verificar el funcionamiento del subsistema de control, pero representa una desviación respecto al protocolo exigido originalmente.
 
 ### 3.2 Requisitos eléctricos
 
-- Lógica discreta alimentada con 5 V.
-- Entradas Pmod limitadas a 3.3 V.
-- Tierra común entre FPGA y protoboard.
-- Divisores o adaptación de nivel para `Q0`, `Q1` y `Q2`.
-- Transistor 2N2222 para aislar e invertir `SOLICITUD_TOPO`.
+El circuito discreto utiliza integrados de la familia 74LS alimentados con 5 V, mientras que las entradas y salidas Pmod de la Nexys 4 trabajan con lógica de 3.3 V. Por esta razón, fue necesario adaptar los niveles eléctricos entre ambos subsistemas.
 
+- La lógica discreta se alimenta con una fuente regulada de 5 V.
+- La FPGA utiliza niveles lógicos LVCMOS de 3.3 V.
+- La FPGA y la protoboard comparten una misma referencia de tierra.
+- Las señales `Q0`, `Q1` y `Q2` pasan por divisores resistivos antes de ingresar a JA1, JA2 y JA3.
+- El voltaje aplicado a una entrada Pmod no debe superar 3.3 V.
+- La señal discreta `SOLICITUD_TOPO` posee una resistencia pull-up de 10 kΩ hacia 5 V.
+- `SOLICITUD_TOPO` es una señal activa en bajo.
+- La salida JA4 no se conecta directamente al nodo de 5 V.
+- Se utiliza un transistor NPN 2N2222 para aislar los niveles eléctricos e invertir la solicitud.
+
+La conexión utilizada para generar la solicitud es:
+
+```text
+JA4 de la FPGA ── resistencia de 10 kΩ ── base del 2N2222
+GND común ─────────────────────────────── emisor del 2N2222
+SOLICITUD_TOPO ────────────────────────── colector del 2N2222
+5 V ── resistencia pull-up de 10 kΩ ───── SOLICITUD_TOPO
+```
 ---
 
 ## 4. Fundamentación teórica
 
 ### 4.1 Lógica combinacional y secuencial
 
-[Explicar compuertas, flip-flops, registros, reloj, reset, clock enable y asignaciones no bloqueantes.]
+Los sistemas digitales se construyen mediante lógica combinacional y lógica secuencial. En la lógica combinacional, las salidas dependen únicamente de las entradas presentes. Algunos ejemplos son las compuertas AND, OR, NOT y XOR, así como los multiplexores, comparadores y decodificadores.
+
+En la lógica secuencial, las salidas también dependen del estado almacenado previamente. Los flip-flops permiten almacenar un bit, mientras que varios flip-flops conectados forman registros y contadores. En este proyecto se utilizan registros para almacenar los estados de la FSM, posiciones, puntajes, tiempos y niveles anteriores de los botones.
+
+Toda la lógica secuencial de la FPGA trabaja con el reloj principal de 100 MHz de la Nexys 4. Para implementar eventos lentos no se generan relojes adicionales, sino una señal `ce_1ms` que habilita los registros una vez por milisegundo. Este enfoque mantiene un único dominio de reloj y facilita el análisis temporal.
+
+El reset utilizado en los módulos es síncrono, ya que se evalúa dentro de bloques:
+
+```systemverilog
+always_ff @(posedge clk)
+```
+
+Los registros utilizan asignaciones no bloqueantes (`<=`), las cuales representan que todos los flip-flops actualizan sus salidas simultáneamente después del flanco activo del reloj. Por otra parte, la lógica combinacional se describe mediante `always_comb` y debe asignar valores en todos los caminos posibles para evitar la inferencia de latches no intencionados.
+
+---
 
 ### 4.2 Linear Feedback Shift Register (LFSR)
 
-[Explicar registros de desplazamiento, XOR, taps, polinomio característico, semilla, periodo máximo y estado prohibido.]
+Un Linear Feedback Shift Register es un registro de desplazamiento cuya entrada se calcula mediante una combinación XOR de algunos de sus bits internos. Los bits utilizados para calcular la realimentación reciben el nombre de *taps*.
+
+En cada pulso de reloj, el contenido del registro se desplaza y el bit calculado mediante XOR se introduce en uno de sus extremos. Si se selecciona un polinomio primitivo, un LFSR de \(n\) bits puede producir una secuencia de periodo máximo:
+
+\[
+T_{\text{máximo}} = 2^n-1
+\]
+
+Para un LFSR de tres bits:
+
+\[
+T_{\text{máximo}} = 2^3-1 = 7
+\]
+
+Esto significa que un LFSR lineal convencional de tres bits puede recorrer como máximo siete estados no nulos antes de repetir la secuencia.
 
 #### Polinomio utilizado
 
+> **Importante:** sustituir esta expresión si los taps físicos utilizados por el equipo son diferentes.
+
+Para una realimentación formada por `Q2 XOR Q1`, el polinomio puede representarse como:
+
+\[
+P(x)=x^3+x^2+1
+\]
+
+La ecuación de realimentación correspondiente es:
+
+\[
+f = Q_2 \oplus Q_1
+\]
+
+Suponiendo que el desplazamiento se realiza como:
+
 ```text
-[COMPLETAR]
+Q2_siguiente = Q1
+Q1_siguiente = Q0
+Q0_siguiente = Q2 XOR Q1
 ```
 
-#### Tabla de estados
+y que la semilla inicial es `001`, se obtiene la siguiente secuencia:
 
-| Pulso | Estado actual | Realimentación | Estado siguiente | LED |
+| Pulso | Estado actual | Realimentación `Q2 XOR Q1` | Estado siguiente | LED |
 |---:|:---:|:---:|:---:|:---:|
-| 0 | [ ] | [ ] | [ ] | [ ] |
-| 1 | [ ] | [ ] | [ ] | [ ] |
-| 2 | [ ] | [ ] | [ ] | [ ] |
+| 0 | `001` | `0` | `010` | LED1 |
+| 1 | `010` | `1` | `101` | LED2 |
+| 2 | `101` | `1` | `011` | LED5 |
+| 3 | `011` | `1` | `111` | LED3 |
+| 4 | `111` | `0` | `110` | LED7 |
+| 5 | `110` | `0` | `100` | LED6 |
+| 6 | `100` | `1` | `001` | LED4 |
 
-Analizar por qué `000` puede ser un estado absorbente y por qué un LFSR máximo de tres bits tiene un periodo máximo de siete estados.
+La tabla debe compararse con la secuencia medida en la protoboard. Si el orden real de desplazamiento o los taps son diferentes, debe modificarse para representar el circuito construido.
+
+#### Estado absorbente `000`
+
+El estado `000` es un estado prohibido para un LFSR basado únicamente en XOR. Si todos los bits son cero, la realimentación también será cero:
+
+\[
+0 \oplus 0 = 0
+\]
+
+Después del desplazamiento, el estado siguiente vuelve a ser `000`. Por lo tanto, el sistema queda bloqueado y no puede salir de ese estado mediante pulsos normales de reloj.
+
+```text
+Estado actual:    000
+Realimentación:     0
+Estado siguiente: 000
+```
+
+Por esta razón se utiliza un reset que carga una semilla diferente de cero, como `001`. Sin embargo, un LFSR de tres bits continúa teniendo solamente siete estados útiles. Para observar las ocho combinaciones en el 74LS138 sin utilizar un estado interno bloqueado, una alternativa consiste en implementar un LFSR de cuatro bits y utilizar tres de sus bits como posición visible.
+
+---
 
 ### 4.3 Decodificador 74LS138
 
-[Explicar entradas, habilitaciones y salidas activas en bajo.]
+El 74LS138 es un decodificador de tres entradas y ocho salidas. Las entradas binarias A, B y C seleccionan una de las ocho salidas disponibles. El integrado también posee entradas de habilitación que deben colocarse en los niveles apropiados para activar su funcionamiento.
 
-| Q2 | Q1 | Q0 | Salida | Posición |
+Las salidas del 74LS138 son activas en bajo. Esto significa que la salida seleccionada toma un valor cercano a 0 V, mientras que las demás permanecen en nivel alto. Los LEDs deben conectarse considerando que el integrado absorbe corriente cuando selecciona una posición.
+
+| Q2 | Q1 | Q0 | Salida activa | Posición |
 |:---:|:---:|:---:|---|---|
 | 0 | 0 | 0 | Y0 | LED0 |
 | 0 | 0 | 1 | Y1 | LED1 |
@@ -121,30 +207,287 @@ Analizar por qué `000` puede ser un estado absorbente y por qué un LFSR máxim
 | 1 | 1 | 0 | Y6 | LED6 |
 | 1 | 1 | 1 | Y7 | LED7 |
 
+De esta manera, la palabra de tres bits generada por el LFSR se convierte en una representación one-hot, en la que solamente uno de los ocho LEDs se encuentra activo.
+
+---
+
 ### 4.4 UART asíncrono
 
-[Explicar trama 8N1, start, ocho bits LSB-first, stop, baud rate, muestreo central, error entre relojes y sincronizador de dos etapas.]
+UART es un protocolo de comunicación serial asíncrono. Los dispositivos transmisor y receptor no comparten una señal de reloj, por lo que ambos deben utilizar una velocidad previamente acordada, denominada *baud rate*.
+
+El formato solicitado para el proyecto fue UART 8N1:
+
+- Un bit de inicio en nivel bajo.
+- Ocho bits de datos.
+- Sin bit de paridad.
+- Un bit de parada en nivel alto.
+- Transmisión del bit menos significativo primero.
+
+```text
+Reposo | START | D0 | D1 | D2 | D3 | D4 | D5 | D6 | D7 | STOP
+   1   |   0   |             8 bits              |  1
+```
+
+La cantidad de ciclos del reloj de la FPGA contenidos en cada bit se calcula mediante:
+
+\[
+CLKS\_PER\_BIT =
+\frac{CLK\_FREQ}{BAUD\_RATE}
+\]
+
+Para un reloj de 100 MHz y una velocidad de 2400 baudios:
+
+\[
+CLKS\_PER\_BIT =
+\frac{100\,000\,000}{2400}
+\approx 41666
+\]
+
+El receptor espera aproximadamente medio periodo después de detectar el bit de inicio. Esto permite comprobar el inicio cerca del centro del bit, donde la señal presenta mayor estabilidad. Posteriormente, cada bit de datos se muestrea una vez por periodo UART.
+
+#### Módulo `uart_synchronizer`
+
+La entrada UART proviene de un circuito con un reloj independiente, por lo que es asíncrona respecto al reloj de la FPGA. El módulo `uart_synchronizer` utiliza dos flip-flops en cascada:
+
+```systemverilog
+serial_meta <= serial_async;
+serial_sync <= serial_meta;
+```
+
+La primera etapa puede experimentar metastabilidad. La segunda reduce la probabilidad de que ese estado se propague hacia la lógica del receptor. Después del reset, ambas etapas se inicializan en uno, correspondiente al estado de reposo de UART.
+
+#### Módulo `uart_rx`
+
+El módulo `uart_rx` implementa el receptor mediante una FSM con cuatro estados:
+
+| Estado | Función |
+|---|---|
+| `IDLE` | Espera que la línea cambie de uno a cero |
+| `START` | Espera medio bit y confirma el inicio |
+| `DATA` | Captura los ocho bits, comenzando por D0 |
+| `STOP` | Verifica el bit de parada y genera `data_valid` |
+
+El parámetro `CLKS_PER_BIT` establece la cantidad de ciclos de 100 MHz por bit, mientras que `HALF_BIT` permite verificar el bit de inicio aproximadamente en su centro.
+
+Los bits recibidos se almacenan mediante:
+
+```systemverilog
+rx_data[bit_index] <= serial_sync;
+```
+
+Al recibir correctamente el bit de parada, `data_valid` se activa durante un solo ciclo de reloj. Esto indica que `rx_data` contiene un byte completo y válido.
+
+El receptor utiliza por defecto:
+
+```systemverilog
+CLK_FREQ  = 100_000_000
+BAUD_RATE = 2400
+```
+
+Ambos valores son parametrizables.
+
+#### Módulo `uart_test_led`
+
+El módulo `uart_test_led` integra:
+
+- Un sincronizador de dos etapas.
+- Una instancia de `uart_rx`.
+- Un decodificador de los tres bits menos significativos.
+- Ocho LEDs de salida.
+
+En esta prueba se configuró el receptor a 9600 baudios:
+
+```systemverilog
+uart_rx #(
+    .CLK_FREQ  (100_000_000),
+    .BAUD_RATE (9600)
+)
+```
+
+Cuando `data_valid` se activa, los tres bits menos significativos se convierten a una representación one-hot:
+
+```systemverilog
+case (rx_data[2:0])
+    3'd0: led <= 8'b00000001;
+    3'd1: led <= 8'b00000010;
+    3'd2: led <= 8'b00000100;
+    3'd3: led <= 8'b00001000;
+    3'd4: led <= 8'b00010000;
+    3'd5: led <= 8'b00100000;
+    3'd6: led <= 8'b01000000;
+    3'd7: led <= 8'b10000000;
+endcase
+```
+
+Esto permitió verificar que un byte UART podía transformarse en la posición correspondiente.
+
+#### Resultado de simulación UART
+
+La simulación integrada utilizó:
+
+```text
+Frecuencia de reloj: 100 MHz
+Baud rate:           2400 baudios
+Formato:             UART 8N1
+CLKS_PER_BIT:        41666 ciclos
+```
+
+Durante la prueba se transmitieron los siguientes bytes:
+
+| Byte transmitido | Bits menos significativos | Posición esperada | Resultado |
+|---:|:---:|---:|---|
+| `0x05` | `101` | 5 | Correcto |
+| `0x03` | `011` | 3 | Correcto |
+| `0x07` | `111` | 7 | Correcto |
+| `0x00` | `000` | 0 | Correcto |
+
+![Simulación integrada del receptor UART](figuras/uart_integrado.png)
+
+En la forma de onda se observa que `serial_async` contiene las tramas generadas por el testbench. La señal `serial_sync` reproduce la entrada después de atravesar el sincronizador de dos etapas.
+
+Durante la recepción, `rx_data` cambia conforme se almacenan los bits. Por esta razón, su contenido solamente debe interpretarse cuando `data_valid` se activa. Después de cada trama válida, la posición registrada sigue la secuencia:
+
+```text
+0 → 5 → 3 → 7 → 0
+```
+
+El resultado demuestra que el sincronizador, la FSM del receptor, el registro de datos y la extracción de `rx_data[2:0]` funcionaron correctamente en simulación con señales UART ideales.
+
+Durante la integración física se presentaron problemas de estabilidad relacionados con la generación discreta del baud rate y la comunicación entre dos relojes independientes. Por esta razón, la versión final utilizó temporalmente el bus paralelo `Q[2:0]`. La simulación se conserva como evidencia de que el receptor UART descrito en HDL funcionó bajo las condiciones temporales establecidas.
+
+---
 
 ### 4.5 Comunicación paralela implementada
 
-[Explicar `Q0`, `Q1`, `Q2`, sincronización, estabilidad, ventajas, desventajas y desviación del requisito UART.]
+La integración final transmite la posición mediante tres señales independientes:
+
+```text
+Q0 → JA1
+Q1 → JA2
+Q2 → JA3
+```
+
+Estas señales representan directamente un valor binario entre cero y siete. Debido a que provienen de un circuito discreto de 5 V, se utilizan divisores resistivos para reducir su nivel antes de conectarlas a la FPGA.
+
+Dentro de la FPGA, `Q[2:0]` atraviesa un sincronizador de dos etapas. Posteriormente, el módulo `parallel_position_receiver` exige que la palabra permanezca estable durante un tiempo configurable antes de aceptarla.
+
+La salida `position_valid` se activa durante un ciclo cuando se acepta la primera posición o cuando se detecta una posición distinta de la anterior.
+
+Las principales ventajas del enlace paralelo son:
+
+- Menor complejidad de integración.
+- No requiere recuperación de baud rate.
+- Permite observar directamente la posición.
+- Facilitó la verificación del control del juego.
+
+Sus principales limitaciones son:
+
+- Utiliza tres líneas en lugar de una.
+- No corresponde al protocolo UART exigido.
+- No contiene bits de inicio o parada.
+- No diferencia dos recepciones consecutivas con el mismo valor sin una señal adicional de dato válido.
+- La coherencia del bus depende del filtro de estabilidad.
+
+---
 
 ### 4.6 Metastabilidad
 
-[Explicar su origen y el sincronizador de dos etapas.]
+La metastabilidad puede ocurrir cuando una entrada cambia muy cerca del flanco activo del reloj. En esta condición, un flip-flop puede tardar un tiempo indeterminado en establecer un cero o un uno válido.
+
+Los botones, la entrada UART y las señales `Q0`, `Q1` y `Q2` son asíncronas respecto al reloj de 100 MHz. Para reducir el riesgo se utilizan dos flip-flops en cascada:
+
+```text
+Entrada asíncrona → primera etapa → segunda etapa → lógica interna
+```
+
+El sincronizador no elimina matemáticamente la metastabilidad, pero aumenta significativamente el tiempo disponible para que la primera etapa se estabilice antes de que la señal sea utilizada por el resto del diseño.
+
+Para el bus paralelo, la sincronización se complementa con una validación temporal. Esto evita aceptar inmediatamente palabras transitorias causadas por diferencias en el tiempo de propagación de los tres bits.
+
+---
 
 ### 4.7 Rebote de botones
 
-[Explicar el rebote, muestreo cada 1 ms, validación de 10 ms y generación de pulsos.]
+Los contactos mecánicos de un pulsador no cambian una sola vez entre cero y uno. Durante algunos milisegundos pueden producir varias transiciones rápidas conocidas como rebote.
+
+Sin un filtro, una sola pulsación podría interpretarse como múltiples golpes. El diseño realiza primero la sincronización de cada botón y después muestrea su nivel cada milisegundo.
+
+Un nuevo estado solamente se acepta si permanece estable durante 10 ms consecutivos. Cuando el nivel filtrado cambia de cero a uno, se genera un pulso de un ciclo:
+
+```systemverilog
+buttons_pulse = buttons_level & ~previous_level;
+```
+
+`buttons_level` permanece alto mientras el botón está presionado, mientras que `buttons_pulse` dura únicamente un ciclo de 100 MHz. Los contadores y la FSM utilizan el pulso para registrar un solo evento por pulsación.
+
+---
 
 ### 4.8 Máquinas de estados
 
-[Explicar estado actual, estado siguiente, FSM Moore, lógica de transición, salidas y prevención de latches.]
+Una máquina de estados finitos controla el comportamiento de un sistema secuencial mediante un conjunto definido de estados y condiciones de transición.
+
+La FSM principal utiliza una arquitectura Moore, porque sus salidas dependen principalmente del estado actual. El diseño se divide en tres partes:
+
+1. Registro del estado actual.
+2. Lógica combinacional de estado siguiente.
+3. Lógica combinacional de salidas.
+
+El registro se actualiza mediante:
+
+```systemverilog
+always_ff @(posedge clk)
+```
+
+La lógica de transición utiliza un valor predeterminado:
+
+```systemverilog
+next_state = current_state;
+```
+
+La lógica de salidas también asigna valores por defecto antes del bloque `case`. Esto garantiza que todas las señales tengan un valor en cualquier condición y evita inferir latches.
+
+Los estados principales controlan:
+
+- Solicitud de una nueva posición.
+- Espera de una posición válida.
+- Inicio de la ventana temporal.
+- Evaluación del golpe.
+- Resolución de acierto o fallo.
+- Inicio y espera de game over.
+- Reinicio automático.
+
+---
 
 ### 4.9 Displays de siete segmentos
 
-[Explicar multiplexación, ánodos y segmentos activos en bajo, frecuencia de refresco y conversión decimal.]
+La Nexys 4 posee displays cuyos segmentos y ánodos son activos en bajo. Un segmento se enciende al colocar cero en su señal, y un dígito se habilita al colocar cero en su ánodo.
 
+El diseño utiliza multiplexación temporal. Solamente un dígito se encuentra activo en cada instante, pero el barrido ocurre suficientemente rápido para que el observador perciba los cuatro dígitos encendidos simultáneamente.
+
+El índice de barrido cambia cada 1 ms:
+
+```text
+AN0 → unidades de aciertos
+AN1 → decenas de aciertos
+AN2 → unidades de fallos
+AN3 → decenas de fallos
+```
+
+Como existen cuatro dígitos, cada uno se actualiza una vez cada 4 ms:
+
+\[
+f_{\text{dígito}} =
+\frac{1}{4\text{ ms}} = 250\text{ Hz}
+\]
+
+Los valores binarios de los contadores se convierten a decimal mediante división y módulo por diez:
+
+```systemverilog
+unidades = valor % 10;
+decenas  = valor / 10;
+```
+
+Posteriormente, un bloque `case` transforma cada dígito decimal en el patrón correspondiente de los segmentos A a G. El punto decimal permanece apagado y los cuatro displays no utilizados permanecen deshabilitados.
 ---
 
 ## 5. Metodología
