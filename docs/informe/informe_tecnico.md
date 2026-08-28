@@ -707,7 +707,148 @@ Nueva posición   Fin de partida
 
 ### 7.1 `ce_1ms_generator`
 
-[Función, entradas, salidas, ecuación del divisor y decisiones.]
+El módulo `ce_1ms_generator` produce una señal de habilitación de un ciclo de reloj cada milisegundo. Esta señal, denominada `ce_1ms`, funciona como base temporal para los módulos que requieren medir intervalos en milisegundos, como el antirrebote de los botones, el temporizador del turno, el generador de solicitudes y el temporizador de finalización de la partida.
+
+El módulo no genera un reloj nuevo. Todos los elementos secuenciales continúan trabajando con el reloj principal de 100 MHz y solamente realizan determinadas operaciones cuando `ce_1ms` se encuentra en nivel alto. Esta decisión evita introducir dominios de reloj adicionales y reduce los posibles problemas de sincronización.
+
+#### Interfaz del módulo
+
+| Señal | Dirección | Descripción |
+| ----- | :-------: | ----------- |
+| `clk` | Entrada | Reloj principal de la FPGA, con una frecuencia de 100 MHz. |
+| `reset` | Entrada | Reinicio síncrono activo en alto. Limpia el contador y desactiva `ce_1ms`. |
+| `ce_1ms` | Salida | Pulso de habilitación de un ciclo de reloj generado cada milisegundo. |
+
+El módulo posee el siguiente parámetro:
+
+| Parámetro | Valor predeterminado | Descripción |
+| --------- | -------------------: | ----------- |
+| `CLK_FREQ_HZ` | `100_000_000` | Frecuencia del reloj principal expresada en hercios. |
+
+#### Cálculo del divisor
+
+La cantidad de ciclos de reloj contenidos en un milisegundo se calcula mediante:
+
+```text
+CYCLES_PER_MS = CLK_FREQ_HZ / 1000
+```
+
+Para el reloj de 100 MHz de la Nexys 4:
+
+```text
+CYCLES_PER_MS = 100 000 000 / 1000
+              = 100 000 ciclos
+```
+
+El periodo del reloj principal es:
+
+```text
+Tclk = 1 / 100 000 000
+     = 10 ns
+```
+
+Por lo tanto, el intervalo contado es:
+
+```text
+100 000 × 10 ns = 1 000 000 ns = 1 ms
+```
+
+El ancho mínimo del contador se determina con:
+
+```systemverilog
+COUNTER_WIDTH = $clog2(CYCLES_PER_MS);
+```
+
+Para `CYCLES_PER_MS = 100000`:
+
+```text
+COUNTER_WIDTH = ceil(log2(100000)) = 17 bits
+```
+
+Esto se debe a que:
+
+```text
+2^16 = 65 536 < 100 000
+2^17 = 131 072 ≥ 100 000
+```
+
+En el código se utiliza una condición adicional para garantizar que el contador tenga al menos un bit cuando el módulo se configura con una frecuencia pequeña:
+
+```systemverilog
+localparam integer COUNTER_WIDTH =
+    (CYCLES_PER_MS <= 1) ? 1 : $clog2(CYCLES_PER_MS);
+```
+
+#### Funcionamiento
+
+El registro `cycle_counter` se incrementa en cada flanco ascendente de `clk`. La cuenta comienza en cero y finaliza cuando alcanza:
+
+```text
+CYCLES_PER_MS - 1 = 99 999
+```
+
+Cuando se alcanza este valor:
+
+- `cycle_counter` regresa a cero.
+- `ce_1ms` se activa durante un ciclo del reloj principal.
+- En el siguiente ciclo, `ce_1ms` vuelve a cero.
+- Comienza la cuenta del siguiente milisegundo.
+
+El comportamiento puede representarse de la siguiente forma:
+
+```text
+Contador:  0, 1, 2, ... 99 998, 99 999, 0, 1, ...
+ce_1ms:    0, 0, 0, ...      0,      1, 0, 0, ...
+```
+
+Aunque el pulso aparece cada milisegundo, su duración no es de 1 ms. Su duración corresponde a un único periodo del reloj de 100 MHz:
+
+```text
+Duración de ce_1ms = 10 ns
+```
+
+De esta manera, `ce_1ms` actúa como una habilitación periódica y no como una señal de reloj de 1 kHz.
+
+#### Comportamiento del reset
+
+El reset es síncrono, por lo que se evalúa únicamente durante el flanco ascendente de `clk`. Cuando `reset` está activo:
+
+```systemverilog
+cycle_counter <= '0;
+ce_1ms        <= 1'b0;
+```
+
+Esto garantiza que el contador vuelva a su estado inicial y que no se genere un pulso de habilitación durante el reinicio.
+
+#### Decisiones de diseño
+
+Se decidió utilizar una señal de habilitación en lugar de dividir físicamente el reloj por las siguientes razones:
+
+- Mantiene todo el diseño dentro de un único dominio de reloj.
+- Evita utilizar una señal generada por lógica común como reloj.
+- Simplifica el análisis temporal durante la síntesis e implementación.
+- Reduce el riesgo de desfases, glitches y problemas de distribución del reloj.
+- Permite reutilizar una misma base temporal en varios módulos.
+- Facilita las simulaciones mediante la modificación del parámetro `CLK_FREQ_HZ`.
+
+El parámetro de frecuencia también permite acelerar los testbenches. En simulación puede emplearse una frecuencia reducida para obtener un pulso equivalente a 1 ms utilizando pocos ciclos, sin modificar la lógica funcional del módulo.
+
+#### Resumen de operación
+
+```text
+Reloj de 100 MHz
+       |
+       v
+Contador de 0 a 99 999
+       |
+       v
+Pulso ce_1ms durante un ciclo
+       |
+       v
+Reinicio del contador y repetición
+```
+
+En consecuencia, `ce_1ms_generator` proporciona una referencia temporal común, síncrona y reutilizable para el resto del sistema.
 
 ### 7.2 `sync_2ff`
 
@@ -1093,8 +1234,7 @@ Lleva la cuenta de los fallos consecutivos del jugador, a diferencia del contado
 | `miss_count[1:0]` | Salida | Valor actual del contador (0–3). |
 | `three_misses` | Salida | Nivel alto mientras el contador esté en 3. |
 | `third_miss_pulse` | Salida | Pulso de un ciclo al completarse el tercer fallo. |
- 
-Ver [`consecutive_misses.sv`](./consecutive_misses.sv).
+
  
 ---
  
@@ -1111,7 +1251,6 @@ Mide el intervalo de 2000 ms (parámetro `GAME_OVER_MS`) durante el cual el sist
 | `active` | Salida | Indica que el temporizador está en curso. |
 | `done_pulse` | Salida | Pulso de un ciclo al cumplirse el tiempo. |
  
-Ver [`game_over_timer.sv`](./game_over_timer.sv).
  
 ---
 
@@ -1135,7 +1274,6 @@ Es el controlador central del juego: coordina la secuencia de un turno completo 
 
 Desde `ST_PLAY`, un acierto (`hit_pulse`) lleva a `ST_RESOLVE_HIT`, que siempre regresa a `ST_REQUEST_START`; un fallo o un `timeout_pulse` llevan a `ST_RESOLVE_MISS`. Ahí se evalúa `third_miss_pulse` (proveniente de 8.11): si no se han acumulado tres fallos consecutivos, la partida continúa; si se cumple la condición, la FSM entra en `ST_GAME_OVER_START → ST_GAME_OVER_WAIT`, donde permanece hasta que `game_over_done` (proveniente de 8.12) indique su finalización. `ST_AUTO_RESET` activa `game_data_reset` para limpiar los contadores de la partida antes de reiniciar el ciclo automáticamente, sin intervención del jugador. La salida `state_debug[3:0]` expone el estado actual únicamente con fines de depuración.
  
-Ver [`game_controller_fsm.sv`](./game_controller_fsm.sv).
  
 ---
 ### 7.14 `seven_segment_controller`
@@ -1147,7 +1285,152 @@ Ver [`seven_segment_controller.sv`](./seven_segment_controller.sv).
 
 ### 7.15 `status_indicator`
 
-[LED fijo durante juego y parpadeante durante game over.]
+El módulo `status_indicator` controla el LED que informa visualmente el estado general del juego. Durante una partida activa, el LED permanece encendido de manera continua. Cuando ocurre el final de la partida, el LED comienza a parpadear. Si el sistema no está jugando ni se encuentra en estado de `game over`, el LED permanece apagado.
+
+En la implementación física, esta señal se muestra mediante el LED de estado de la FPGA.
+
+#### Interfaz del módulo
+
+| Señal | Dirección | Descripción |
+| ----- | :-------: | ----------- |
+| `clk` | Entrada | Reloj principal de 100 MHz. |
+| `reset` | Entrada | Reinicio síncrono activo en alto. |
+| `ce_1ms` | Entrada | Pulso de habilitación generado cada milisegundo. |
+| `game_active` | Entrada | Indica que existe una partida activa. |
+| `game_over` | Entrada | Indica que la partida ha finalizado. |
+| `status_led` | Salida | Señal que controla el LED indicador. |
+
+El módulo incluye el siguiente parámetro:
+
+| Parámetro | Valor predeterminado | Descripción |
+| --------- | -------------------: | ----------- |
+| `BLINK_MS` | `250` | Duración, en milisegundos, de cada estado del parpadeo. Corresponde a medio periodo. |
+
+#### Funcionamiento durante la partida
+
+Cuando `game_active` se encuentra activo y `game_over` está desactivado, la salida se mantiene en nivel alto:
+
+```text
+game_active = 1
+game_over   = 0
+status_led  = 1
+```
+
+En esta condición, el LED permanece encendido de forma continua para indicar que el juego se encuentra en ejecución.
+
+#### Funcionamiento durante game over
+
+Cuando `game_over` se activa, el módulo utiliza `ce_1ms` para contar intervalos de tiempo. El registro `blink_counter` se incrementa una vez por milisegundo hasta alcanzar:
+
+```text
+BLINK_MS - 1
+```
+
+Con el valor predeterminado:
+
+```text
+BLINK_MS - 1 = 249
+```
+
+Al completar 250 pulsos de `ce_1ms`, el contador vuelve a cero y `blink_state` cambia de estado:
+
+```systemverilog
+blink_state <= ~blink_state;
+```
+
+Por lo tanto, el LED permanece 250 ms apagado y 250 ms encendido. El periodo completo del parpadeo es:
+
+```text
+Tparpadeo = 2 × BLINK_MS
+           = 2 × 250 ms
+           = 500 ms
+```
+
+La frecuencia resultante es:
+
+```text
+fparpadeo = 1 / 0.5 s
+           = 2 Hz
+```
+
+El comportamiento aproximado es:
+
+```text
+Tiempo:       0–249 ms   250–499 ms   500–749 ms   750–999 ms
+status_led:      0            1            0             1
+```
+
+El parpadeo comienza con el LED apagado porque `blink_state` se inicializa en cero.
+
+#### Prioridad de las señales
+
+La lógica de salida asigna prioridad a `game_over` sobre `game_active`:
+
+```systemverilog
+if (game_over)
+    status_led = blink_state;
+else if (game_active)
+    status_led = 1'b1;
+else
+    status_led = 1'b0;
+```
+
+Esto significa que, si ambas señales se activaran simultáneamente, el LED mostraría el patrón parpadeante correspondiente al final de la partida.
+
+La tabla de comportamiento es la siguiente:
+
+| `game_over` | `game_active` | `status_led` | Indicación |
+| :---------: | :-----------: | :----------: | ---------- |
+| 0 | 0 | 0 | Sistema inactivo |
+| 0 | 1 | 1 | Partida activa |
+| 1 | 0 | `blink_state` | Fin de partida |
+| 1 | 1 | `blink_state` | Fin de partida con prioridad |
+
+#### Reinicio del parpadeo
+
+Cuando se activa `reset`, tanto el contador como el estado de parpadeo regresan a cero:
+
+```systemverilog
+blink_counter <= '0;
+blink_state   <= 1'b0;
+```
+
+El contador también se limpia cuando `game_over` está desactivado. Esta decisión garantiza que cada vez que se ingrese al estado de final de partida, el patrón de parpadeo comience desde una condición conocida.
+
+```text
+game_over = 0
+      |
+      v
+blink_counter = 0
+blink_state   = 0
+```
+
+De esta forma, un parpadeo anterior no afecta el inicio del siguiente.
+
+#### Decisiones de diseño
+
+Se utilizó `ce_1ms` como habilitación temporal en lugar de generar un reloj independiente para el LED. Esto mantiene el módulo dentro del mismo dominio de reloj que el resto del sistema.
+
+Las principales decisiones fueron:
+
+- Mantener el LED fijo durante una partida activa.
+- Utilizar un patrón parpadeante para diferenciar claramente el final del juego.
+- Dar prioridad visual a `game_over`.
+- Reiniciar la fase de parpadeo al abandonar el estado de finalización.
+- Parametrizar el tiempo mediante `BLINK_MS`.
+- Utilizar asignaciones no bloqueantes en la lógica secuencial.
+- Separar el contador secuencial de la lógica combinacional de salida.
+
+#### Resumen de operación
+
+```text
+Sistema inactivo  -> LED apagado
+Partida activa    -> LED encendido fijo
+Game over         -> LED parpadeante a 2 Hz
+Reset             -> LED y contador reiniciados
+```
+
+En consecuencia, `status_indicator` permite conocer rápidamente el estado general del juego sin utilizar los displays de puntuación ni observar señales internas de depuración.
 
 ### 7.16 `whack_a_mole_top`
 
@@ -1278,58 +1561,150 @@ La integración de estas funciones dentro de `whack_a_mole_top` permite mantener
 
 ## 8. Asignación de pines
 
-### 8.1 Posición y solicitud
+La asignación de pines se definió en el archivo de restricciones `whack_a_mole_top.xdc`. Todas las señales digitales externas utilizan el estándar eléctrico `LVCMOS33`, correspondiente a niveles lógicos de 3.3 V.
 
-| Señal | Conector | Pin FPGA |
-|---|---|---|
-| Q0 | JA1 | B13 |
-| Q1 | JA2 | F14 |
-| Q2 | JA3 | D17 |
-| `solicitud_topo` | JA4 | E17 |
+### 8.1 Reloj y reset
 
-### 8.2 Botones
+| Señal | Elemento de la Nexys 4 | Pin FPGA | Descripción |
+| ----- | ---------------------- | -------- | ----------- |
+| `clk` | Oscilador principal | E3 | Reloj de 100 MHz |
+| `reset_button` | BTNC | E16 | Reset general activo en alto |
 
-| Botón | Conector | Pin FPGA |
-|---:|---|---|
-| 0 | JB1 | G14 |
-| 1 | JB2 | P15 |
-| 2 | JB3 | V11 |
-| 3 | JB4 | V15 |
-| 4 | JB7 | K16 |
-| 5 | JB8 | R16 |
-| 6 | JB9 | T9 |
-| 7 | JB10 | U11 |
+La restricción temporal del reloj se definió con un periodo de 10 ns:
 
-![Conexiones](figuras/conexiones.png)
+```tcl
+create_clock -add -name sys_clk_pin -period 10.000 \
+    -waveform {0 5} [get_ports clk]
+```
+
+### 8.2 Posición y solicitud
+
+| Señal | Puerto del módulo superior | Conector | Pin FPGA | Dirección |
+| ----- | -------------------------- | -------- | -------- | :-------: |
+| Q0 | `position_async[0]` | JA1 | B13 | Entrada |
+| Q1 | `position_async[1]` | JA2 | F14 | Entrada |
+| Q2 | `position_async[2]` | JA3 | D17 | Entrada |
+| `SOLICITUD_TOPO` | `solicitud_topo` | JA4 | E17 | Salida |
+
+Las señales `Q0`, `Q1` y `Q2` provienen del LFSR implementado en la sección discreta. Debido a que esta sección funciona con niveles cercanos a 5 V, cada línea debe ingresar a la FPGA mediante un circuito de adaptación de nivel. No se deben aplicar directamente 5 V a los pines Pmod.
+
+La salida `solicitud_topo` trabaja a 3.3 V y controla un transistor 2N2222, utilizado para aislar e invertir la señal antes de introducirla al circuito discreto de 5 V.
+
+### 8.3 Botones externos
+
+| Botón | Puerto del módulo superior | Conector | Pin FPGA |
+| ----: | -------------------------- | -------- | -------- |
+| 0 | `buttons_async[0]` | JB1 | G14 |
+| 1 | `buttons_async[1]` | JB2 | P15 |
+| 2 | `buttons_async[2]` | JB3 | V11 |
+| 3 | `buttons_async[3]` | JB4 | V15 |
+| 4 | `buttons_async[4]` | JB7 | K16 |
+| 5 | `buttons_async[5]` | JB8 | R16 |
+| 6 | `buttons_async[6]` | JB9 | T9 |
+| 7 | `buttons_async[7]` | JB10 | U11 |
+
+Los ocho pulsadores se conectaron a entradas Pmod de la FPGA. Cada botón representa una de las ocho posiciones posibles del topo. Las señales ingresan inicialmente como `buttons_async[7:0]` y posteriormente son sincronizadas y filtradas por el banco de botones.
+
+Los botones externos y la FPGA deben compartir una referencia de tierra común. En la conexión utilizada, cada pulsador genera un nivel alto al presionarse y un nivel bajo al liberarse.
+
+### 8.4 LED de posición
+
+Los LED `LD0` a `LD7` de la Nexys 4 muestran la posición recibida desde el circuito discreto. Solamente debe permanecer encendido el LED correspondiente al valor de `position_async[2:0]`.
+
+| Posición | Señal | LED | Pin FPGA |
+| -------: | ----- | --- | -------- |
+| 0 | `mole_leds[0]` | LD0 | T8 |
+| 1 | `mole_leds[1]` | LD1 | V9 |
+| 2 | `mole_leds[2]` | LD2 | R8 |
+| 3 | `mole_leds[3]` | LD3 | T6 |
+| 4 | `mole_leds[4]` | LD4 | T5 |
+| 5 | `mole_leds[5]` | LD5 | T4 |
+| 6 | `mole_leds[6]` | LD6 | U7 |
+| 7 | `mole_leds[7]` | LD7 | U6 |
+
+Estos LED permiten verificar visualmente que la FPGA recibió y decodificó correctamente la posición generada por el LFSR.
+
+### 8.5 LED de diagnóstico
+
+Durante la integración se utilizaron los LED `LD8` a `LD14` para observar señales internas sin necesidad de utilizar instrumentación lógica externa.
+
+| LED | Señal observada | Puerto | Pin FPGA |
+| --- | --------------- | ------ | -------- |
+| LD8 | `solicitud_topo` | `debug_leds[0]` | V4 |
+| LD9 | Generador de solicitud ocupado (`busy`) | `debug_leds[1]` | U3 |
+| LD10 | Solicitud pendiente | `debug_leds[2]` | V1 |
+| LD11 | Bit 0 del estado de la FSM | `debug_leds[3]` | R1 |
+| LD12 | Bit 1 del estado de la FSM | `debug_leds[4]` | P5 |
+| LD13 | Bit 2 del estado de la FSM | `debug_leds[5]` | U1 |
+| LD14 | Bit 3 del estado de la FSM | `debug_leds[6]` | R2 |
+
+La combinación de `LD11` a `LD14` permite identificar el estado interno de la máquina principal durante las pruebas físicas. Esta instrumentación fue especialmente útil para determinar si el sistema esperaba una nueva posición, mantenía un turno activo o había ingresado al estado de finalización.
+
+### 8.6 LED de estado
+
+| Señal | LED | Pin FPGA | Función |
+| ----- | --- | -------- | ------- |
+| `status_led` | LD15 | P2 | Indicación general del estado del juego |
+
+El comportamiento de `LD15` es el siguiente:
+
+- Apagado cuando el sistema está inactivo.
+- Encendido de forma continua durante una partida activa.
+- Parpadeante durante el estado de `game over`.
+
+### 8.7 Segmentos del display
+
+Los segmentos del display de siete segmentos son activos en bajo. Esto significa que un segmento se enciende cuando la FPGA coloca un cero lógico en su salida.
+
+| Segmento | Señal | Pin FPGA |
+| :------: | ----- | -------- |
+| a | `seg[0]` | L3 |
+| b | `seg[1]` | N1 |
+| c | `seg[2]` | L5 |
+| d | `seg[3]` | L4 |
+| e | `seg[4]` | K3 |
+| f | `seg[5]` | M2 |
+| g | `seg[6]` | L6 |
+| Punto decimal | `dp` | M4 |
+
+El punto decimal no se utiliza para representar los puntajes, por lo que se mantiene apagado.
+
+### 8.8 Selección de dígitos
+
+Los ánodos del display también son activos en bajo. El controlador habilita un dígito a la vez y realiza un barrido suficientemente rápido para producir la percepción de que los cuatro dígitos están encendidos simultáneamente.
+
+| Dígito | Señal | Pin FPGA | Uso en el proyecto |
+| -----: | ----- | -------- | ------------------ |
+| 0 | `an[0]` | N6 | Unidades de aciertos |
+| 1 | `an[1]` | M6 | Decenas de aciertos |
+| 2 | `an[2]` | M3 | Unidades de fallos |
+| 3 | `an[3]` | N5 | Decenas de fallos |
+| 4 | `an[4]` | N2 | Apagado |
+| 5 | `an[5]` | N4 | Apagado |
+| 6 | `an[6]` | L1 | Apagado |
+| 7 | `an[7]` | M1 | Apagado |
+
+Aunque la Nexys 4 dispone de ocho dígitos, el proyecto utiliza solamente cuatro: dos para los aciertos y dos para los fallos acumulados.
+
+### 8.9 Consideraciones eléctricas
+
+Para realizar las conexiones se aplicaron las siguientes precauciones:
+
+- Los pines de entrada y salida de la FPGA operan con lógica de 3.3 V.
+- Las salidas de 5 V de los integrados 74LS no se conectaron directamente a la FPGA.
+- Las líneas `Q0`, `Q1` y `Q2` se adaptaron a un nivel seguro antes de ingresar por JA1, JA2 y JA3.
+- La FPGA y la protoboard utilizan una tierra común.
+- La señal `solicitud_topo` se conectó al circuito discreto mediante un transistor 2N2222.
+- Los botones externos se conectaron de forma que nunca aplicaran más de 3.3 V a las entradas JB.
+- Todas las señales de propósito general se configuraron con el estándar `LVCMOS33`.
+
+La tierra común es necesaria para que ambos subsistemas interpreten los niveles lógicos con respecto a la misma referencia eléctrica.
 
 ---
 
 ## 9. Verificación por simulación
 
-### 9.1 Metodología
-
-[Explicar testbenches autoverificables, estímulos, comparaciones, `PASS`, `$error`, `$fatal` y parámetros reducidos.]
-
-### 9.2 Resultados
-
-| Testbench | Cobertura | Resultado |
-|---|---|---|
-| `tb_ce_1ms_generator` | Periodo, ancho y reset | [ ] |
-| `tb_button_bank` | Rebote y botones simultáneos | PASS |
-| `tb_parallel_position_receiver` | Estabilidad y validación | PASS |
-| `tb_mole_request_generator` | Pulso, `busy` y pendiente | PASS |
-| `tb_game_hit_evaluator` | Acierto, fallo y simultaneidad | [ ] |
-| `tb_turn_window_timer` | Inicio, cancelación y timeout | [ ] |
-| `tb_difficulty_controller` | Reducción y saturación | [ ] |
-| `tb_score_counters` | Incrementos y saturación | [ ] |
-| `tb_consecutive_misses` | Tres fallos y reinicio | [ ] |
-| `tb_game_over_timer` | Duración y finalización | [ ] |
-| `tb_game_controller_fsm` | Recorrido de estados | [ ] |
-| `tb_seven_segment_controller` | Dígitos y patrones | [ ] |
-| `tb_status_indicator` | Juego y game over | [ ] |
-| `tb_whack_a_mole_top` | Integración completa | PASS |
-
-### 9.3 Evidencias
+### 9.1 Evidencias
 
 #### Simulación de `button_bank`
 
@@ -1404,32 +1779,228 @@ La simulación permite comprobar que la solicitud de posición, la recepción de
 
 ### 10.1 Análisis del LFSR
 
-Comparar secuencia teórica y medida, periodo, estados ausentes, bloqueo en `000`, comportamiento de LED1, causa y solución recomendada.
+El LFSR de tres bits fue utilizado para generar las posiciones pseudoaleatorias del topo. Teóricamente, un LFSR máximo de tres bits puede recorrer siete estados diferentes antes de repetir la secuencia:
+
+```text
+Periodo máximo = 2^3 - 1 = 7 estados
+```
+
+El estado `000` queda excluido de la secuencia normal porque la operación XOR aplicada a bits iguales en cero produce nuevamente cero. Si el registro entra en `000`, la realimentación continúa siendo cero y el LFSR no puede abandonar este estado por sí mismo:
+
+```text
+Estado actual:       000
+Realimentación XOR:    0
+Estado siguiente:    000
+```
+
+Por esta razón, `000` se denomina estado absorbente o estado prohibido. En el circuito construido, `Q[2:0] = 000` también corresponde a la activación de `Y0` en el 74LS138 y, por tanto, al encendido de LED0. Esto provoca una ambigüedad: LED0 puede representar una posición válida desde el punto de vista del decodificador, pero también puede indicar que el LFSR quedó atrapado en su estado prohibido.
+
+Durante las pruebas físicas se observó que, en algunas ocasiones, el circuito permanecía indefinidamente en LED0. La única forma inmediata de recuperar la secuencia era activar el reset propio del LFSR, el cual cargaba una semilla diferente de cero y colocaba el circuito nuevamente en LED1.
+
+La secuencia teórica debe compararse con los estados medidos directamente en `Q2`, `Q1` y `Q0`. Para realizar una comparación correcta no basta con observar los LED, debido a que las salidas del 74LS138 son activas en bajo. La medición debe registrar el estado binario del LFSR después de cada flanco válido de solicitud.
+
+| Aspecto | Comportamiento teórico | Comportamiento observado |
+| ------- | ---------------------- | ------------------------ |
+| Cantidad máxima de estados no nulos | 7 | Se observaron diferentes posiciones antes de repetirse |
+| Estado `000` | Debe excluirse de la secuencia | En algunas pruebas se presentó como bloqueo en LED0 |
+| Semilla | Debe ser diferente de `000` | El reset del LFSR lo colocaba en LED1 |
+| Avance | Un estado por cada solicitud válida | Funcionó cuando el pulso llegó correctamente |
+| Repetición | Después de siete estados para un LFSR máximo | Debe verificarse experimentalmente con la tabla completa |
+| Recuperación ante bloqueo | Carga de una semilla no nula | Se realizó manualmente mediante reset |
+
+También se observó una detención aparente cuando se alcanzaba LED1. Sin embargo, las pruebas de diagnóstico indicaron que este comportamiento no era necesariamente un bloqueo interno del estado `001`. Cuando se aplicaba manualmente un pulso al circuito discreto, el LFSR avanzaba y el juego continuaba conservando el puntaje. Además, los LED de diagnóstico de la FPGA mostraban que la máquina de estados permanecía en `WAIT_POSITION`.
+
+Esto permite concluir que, en el caso de LED1, la FPGA estaba esperando una nueva posición y que la solicitud automática no había sido reconocida correctamente por el circuito discreto. Por tanto, se deben separar los dos problemas:
+
+- El bloqueo en LED0 es compatible con el estado absorbente `000` del LFSR.
+- La detención en LED1 se relaciona principalmente con la generación, adaptación o detección de `SOLICITUD_TOPO`, y no con que `001` sea un estado prohibido.
+
+Las soluciones recomendadas para el LFSR son:
+
+1. Cargar siempre una semilla diferente de `000` durante el reset.
+2. Detectar el estado `000` y sustituirlo automáticamente por una semilla válida.
+3. Revisar los taps para garantizar un polinomio de periodo máximo.
+4. Evitar utilizar `000` como una posición normal si el mismo valor representa el estado prohibido.
+5. Verificar experimentalmente la secuencia completa mediante mediciones de `Q[2:0]`.
+6. Incorporar un circuito de recuperación automática en lugar de depender de un reset manual.
+
+Una posible protección puede expresarse conceptualmente como:
+
+```systemverilog
+if (reset || lfsr_state == 3'b000)
+    lfsr_state <= 3'b001;
+else
+    lfsr_state <= next_lfsr_state;
+```
+
+Esta modificación impediría que el circuito permaneciera indefinidamente en `000`.
 
 ### 10.2 Análisis de comunicación
 
-Explicar:
+#### Comunicación UART
 
-- Problemas encontrados con UART.
-- Pruebas UART que sí funcionaron.
-- Motivo para usar el bus paralelo.
-- Ventajas y limitaciones del cambio.
-- Consecuencias sobre la rúbrica.
+La arquitectura original requería una comunicación UART asíncrona con trama 8N1. Para cumplir esta parte se desarrollaron los módulos `uart_synchronizer`, `uart_rx` y `uart_test_led`.
+
+El sincronizador de dos etapas reducía el riesgo de metastabilidad de la entrada serial. El receptor UART detectaba el bit de inicio, esperaba hasta el centro de cada bit, recibía ocho bits en orden LSB-first y verificaba el bit de parada. Finalmente, `uart_test_led` utilizaba los tres bits menos significativos del byte recibido para representar la posición mediante LED.
+
+Las simulaciones funcionales demostraron que la lógica UART podía recibir correctamente valores como:
+
+```text
+0x05 -> posición 5
+0x03 -> posición 3
+0x07 -> posición 7
+0x00 -> posición 0
+```
+
+La señal `data_valid` se activó al completar cada trama válida y el dato recibido se mantuvo estable. Esto demostró que el diseño lógico del receptor funcionaba bajo las condiciones ideales del testbench.
+
+No obstante, durante la integración física la comunicación no se comportó de manera estable. Entre las posibles causas se encuentran:
+
+- Diferencia entre la frecuencia real del transmisor discreto y la frecuencia configurada en la FPGA.
+- Error acumulado en la duración de los bits.
+- Forma de onda degradada por conexiones largas en protoboard.
+- Ruido o transiciones lentas en la línea serial.
+- Incompatibilidad de niveles entre lógica de 5 V y entradas de 3.3 V.
+- Errores en la generación del bit de inicio, datos o bit de parada.
+- Muestreo fuera del centro del bit.
+- Ausencia de una referencia temporal suficientemente precisa en el transmisor discreto.
+
+No se obtuvo evidencia suficiente para atribuir la falla a una única causa. Sin embargo, la simulación permitió determinar que el receptor funcionaba correctamente con una trama ideal, mientras que el problema aparecía al conectar el transmisor físico.
+
+#### Sustitución mediante bus paralelo
+
+Debido al tiempo disponible para completar la integración, se sustituyó el enlace UART por un bus paralelo de tres bits:
+
+```text
+Q0 -> position_async[0]
+Q1 -> position_async[1]
+Q2 -> position_async[2]
+```
+
+Cada señal fue adaptada a un nivel seguro para la FPGA y posteriormente sincronizada mediante flip-flops. El módulo `parallel_position_receiver` verificó que la posición permaneciera estable antes de entregarla a la máquina de estados.
+
+Las principales ventajas del bus paralelo fueron:
+
+- Implementación física más sencilla.
+- Observación directa de cada bit con multímetro o LED.
+- Eliminación de la dependencia del baud rate.
+- Menor complejidad para detectar errores.
+- Recepción inmediata de la posición.
+- Mayor facilidad para probar independientemente el LFSR y la FPGA.
+
+Sus principales limitaciones fueron:
+
+- Utilización de tres líneas de datos en lugar de una.
+- Necesidad de adaptar eléctricamente cada línea.
+- Ausencia de una trama con bits de inicio y parada.
+- Menor escalabilidad para transmitir datos de mayor tamaño.
+- Posibilidad de recibir una combinación transitoria si los bits no cambian simultáneamente.
+- Desviación respecto al requisito explícito de comunicación UART.
+
+La sincronización de dos etapas reduce la metastabilidad, pero no garantiza por sí sola que los tres bits pertenezcan al mismo estado durante una transición. Por esta razón se incorporó una validación de estabilidad antes de aceptar una posición nueva.
+
+#### Consecuencias sobre la rúbrica
+
+La sustitución del enlace UART permitió completar y demostrar el funcionamiento general del juego, incluyendo generación de posiciones, lectura de botones, evaluación de golpes, temporización, dificultad, conteo y finalización de la partida.
+
+Sin embargo, el bus paralelo no cumple literalmente el requisito de comunicación UART 8N1 indicado en el instructivo. Por tanto, esta modificación debe declararse como una limitación y puede producir una reducción en la calificación correspondiente a comunicación e integración.
+
+Los módulos UART, sus testbenches y sus resultados de simulación demuestran que el protocolo fue estudiado e implementado digitalmente. Aun así, no debe afirmarse que la comunicación UART quedó completamente implementada, porque no se consiguió una operación física estable entre ambos subsistemas.
 
 ### 10.3 Análisis de la FPGA
 
-[Analizar simulación, síntesis, timing, clock enable, ausencia de latches y comportamiento físico.]
+Los módulos fueron evaluados inicialmente mediante testbenches individuales. Esta estrategia permitió comprobar cada función antes de integrarla con el resto del sistema.
+
+Entre las pruebas realizadas se verificaron:
+
+- Generación de `ce_1ms`.
+- Sincronización y validación de la posición paralela.
+- Antirrebote y generación de un pulso por botón.
+- Evaluación de aciertos y fallos.
+- Temporización de la ventana de juego.
+- Reducción de la duración después de cada acierto.
+- Conteo de aciertos y fallos acumulados.
+- Reinicio de fallos consecutivos después de un acierto.
+- Detección de tres fallos consecutivos.
+- Transiciones de la FSM.
+- Multiplexación de los displays.
+- Comportamiento del LED de estado.
+- Funcionamiento integral del módulo superior.
+
+La simulación del módulo superior confirmó los siguientes comportamientos:
+
+```text
+PASS: La posición 2 enciende LED2
+PASS: Botón correcto incrementa aciertos
+PASS: Acierto reduce la duración del turno
+PASS: Botón incorrecto cuenta fallo consecutivo
+PASS: Acierto reinicia fallos consecutivos
+PASS: Timeout cuenta como fallo
+PASS: Tres fallos consecutivos producen game over
+PASS: Indicador de estado permanece definido
+PASS: Auto reset limpia ambos puntajes
+PASS: Auto reset restaura dificultad inicial
+PASS: tb_whack_a_mole_top completo sin errores
+```
+
+Posteriormente se modificó el comportamiento final para que el juego permaneciera en `game over` hasta recibir un reset general, de acuerdo con la decisión tomada durante las pruebas físicas. Esta diferencia debe reflejarse en el testbench final si se conserva dicha versión del controlador.
+
+El diseño completó correctamente las etapas de síntesis, implementación y generación del bitstream. Esto demuestra que las construcciones de SystemVerilog utilizadas fueron sintetizables y que Vivado pudo asignarlas a los recursos de la FPGA.
+
+No se utilizaron relojes generados mediante lógica común. El sistema trabaja con el reloj principal de 100 MHz y emplea señales de habilitación, como `ce_1ms`, para ejecutar operaciones lentas. Esta decisión mantiene un único dominio de reloj y simplifica el análisis temporal.
+
+Los bloques secuenciales fueron descritos mediante `always_ff` y asignaciones no bloqueantes. Las decisiones combinacionales, particularmente la lógica de siguiente estado de la FSM, asignan valores predeterminados antes de evaluar las condiciones. Esto evita conservar valores accidentalmente y reduce el riesgo de inferir latches.
+
+La validación temporal debe respaldarse con el reporte de timing de Vivado. No es suficiente que la generación del bitstream termine correctamente; para afirmar que el diseño cumple timing debe verificarse que el peor margen temporal sea no negativo:
+
+```text
+WNS >= 0 ns
+TNS = 0 ns
+```
+
+Si estos valores aparecen en el reporte final, puede afirmarse que el diseño satisface las restricciones del reloj de 100 MHz. Los valores exactos de WNS y TNS deben copiarse del resumen de temporización de la implementación.
+
+En las pruebas físicas, la FPGA respondió correctamente a los botones, actualizó los displays, redujo la duración de los turnos y detectó tres fallos consecutivos. Los principales problemas observados no se originaron en los contadores ni en la lógica de evaluación, sino en la interfaz con el circuito discreto: niveles eléctricos, generación de solicitudes y bloqueo del LFSR.
+
+Los LED de diagnóstico permitieron observar señales internas importantes:
+
+- Solicitud activa.
+- Generador de solicitud ocupado.
+- Solicitud pendiente.
+- Estado actual de la FSM.
+
+Cuando solamente `LD11` permanecía encendido, el código mostrado por los LED de estado era:
+
+```text
+FSM = 0001 = WAIT_POSITION
+```
+
+Esto demostró que la FPGA no estaba congelada. La máquina de estados funcionaba y esperaba que el receptor validara una nueva posición.
 
 ### 10.4 Problemas y soluciones
 
-| Problema | Causa | Diagnóstico | Solución |
-|---|---|---|---|
-| UART inestable | [ ] | [ ] | Enlace paralelo |
-| Solicitud perdida | Pulso ocupado | LEDs de diagnóstico | Solicitud pendiente |
-| Bloqueo LED0 | Estado `000` | Secuencia LFSR | [ ] |
-| Bloqueo LED1 | Solicitud no reconocida | FSM en `WAIT_POSITION` | [ ] |
-| Niveles de 5 V | Incompatibilidad | Multímetro | Divisores y 2N2222 |
+| Problema | Causa probable | Diagnóstico realizado | Solución aplicada o recomendada |
+| -------- | -------------- | --------------------- | ------------------------------- |
+| UART inestable | Diferencias de temporización, señal física degradada o incompatibilidad de niveles | El receptor funcionó en simulación con tramas ideales, pero no de forma estable con el transmisor discreto | Se utilizó temporalmente un enlace paralelo `Q[2:0]`; como solución definitiva se recomienda medir la trama con osciloscopio y ajustar el transmisor UART |
+| Solicitud perdida | Una nueva orden podía aparecer mientras el generador mantenía un pulso activo | LED de `busy`, solicitud y estado de la FSM | Se agregó una solicitud pendiente de profundidad uno y un intervalo bajo entre pulsos |
+| Bloqueo en LED0 | Entrada del LFSR al estado absorbente `000` | LED0 permanecía activo y el reset del LFSR recuperaba la secuencia | Cargar una semilla no nula y detectar automáticamente `000` para reemplazarlo por `001` |
+| Detención en LED1 | El circuito discreto no reconocía una nueva solicitud automática | La FSM permanecía en `WAIT_POSITION`; un pulso manual hacía avanzar el LFSR sin perder el puntaje | Revisar el ancho, polaridad y nivel del pulso; verificar el 2N2222 y agregar detección robusta de flanco en el circuito discreto |
+| Niveles de 5 V | Incompatibilidad con entradas LVCMOS33 de la FPGA | Medición de aproximadamente 3.7 V y 5 V con multímetro | Utilizar divisores resistivos para `Q[2:0]`, tierra común y transistor 2N2222 para `SOLICITUD_TOPO` |
+| Rebote de botones | Transiciones mecánicas múltiples durante una sola pulsación | Una pulsación podía interpretarse como varios eventos sin filtrado | Sincronización, muestreo cada 1 ms, validación durante 10 ms y generación de un pulso único |
+| Cambio transitorio en `Q[2:0]` | Los tres bits pueden no llegar exactamente al mismo tiempo | Posibilidad de observar valores intermedios durante el cambio de posición | Sincronizador de dos etapas y validación de estabilidad antes de aceptar el dato |
+| Juego detenido después de una posición | La FSM esperaba un dato nuevo que nunca fue validado | Estado `WAIT_POSITION` visible mediante `LD11`–`LD14` | Verificar que cada solicitud produzca un cambio real y reconocible en `Q[2:0]` |
+| Pérdida del puntaje al recuperar el LFSR | Se utilizaba el reset general para salir del bloqueo | El reset general limpiaba contadores, dificultad y estado | Separar el reset del LFSR del reset general o incorporar recuperación automática del estado prohibido |
+| Finalización automática no deseada | El diseño inicial incluía un temporizador de game over de 2 s | Después de finalizar, el sistema podía comenzar otra partida automáticamente | Modificar la FSM para permanecer en `game over` hasta recibir el reset general |
 
+### 10.5 Interpretación general
+
+Los resultados demuestran que la arquitectura modular de la FPGA funcionó correctamente tanto en las simulaciones unitarias como en la simulación integral. El sistema fue capaz de recibir posiciones, detectar botones, evaluar jugadas, modificar la dificultad, controlar los puntajes y finalizar la partida después de tres fallos consecutivos.
+
+Las dificultades principales aparecieron en la interacción entre dos tecnologías con características diferentes: lógica TTL de 5 V en protoboard y lógica LVCMOS de 3.3 V en la FPGA. Los problemas de nivel, temporización y reconocimiento de pulsos no siempre se manifestaron en simulación, porque los testbenches utilizan señales ideales.
+
+La prueba más importante para separar las posibles causas consistió en avanzar manualmente el LFSR mientras la FSM permanecía en `WAIT_POSITION`. Como el juego continuó sin perder el puntaje, se comprobó que la lógica principal de la FPGA seguía funcionando y que la detención se encontraba en la ruta de solicitud o en su reconocimiento por el circuito discreto.
+
+Por tanto, la implementación valida la mayor parte de la lógica funcional del proyecto, pero también demuestra la importancia de complementar la simulación digital con mediciones físicas. La principal mejora futura consiste en robustecer el LFSR y la interfaz de solicitud, además de completar la comunicación UART física requerida originalmente.
 ---
 
 ## 11. Conclusiones
