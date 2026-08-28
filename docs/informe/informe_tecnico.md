@@ -464,16 +464,107 @@ Esta separación permite mantener independiente la lógica de control del juego 
 
 ### 8.7 `game_hit_evaluator`
 
-[Conversión one-hot y criterios de acierto/fallo.]
+## Entradas
+
+| Señal | Tipo | Descripción |
+|---|---|---|
+| `turn_active` | `logic` | Bandera que indica si el sistema debe evaluar entradas en ese momento (turno de juego en curso). |
+| `active_position` | `logic [2:0]` | Índice binario (0–7) que indica cuál de los 8 topos está activo actualmente. |
+| `buttons_pulse` | `logic [7:0]` | Vector de 8 bits donde cada bit representa el pulso de un botón físico; se espera que solo un bit esté en 1 cuando el jugador presiona. |
+
+## Salidas
+
+| Señal | Tipo | Descripción |
+|---|---|---|
+| `active_mole_onehot` | `logic [7:0]` | Representación one-hot de `active_position`; tiene un único bit en 1 correspondiente a la posición del topo activo. |
+| `any_press` | `logic` | Se activa (`1`) cuando al menos un bit de `buttons_pulse` está en 1, es decir, hubo alguna pulsación. |
+| `hit_pulse` | `logic` | Se activa cuando el botón presionado coincide exactamente con la posición del topo activo. |
+| `miss_pulse` | `logic` | Se activa cuando hubo una pulsación pero no coincide con la posición del topo activo. |
+
+## Funcionamiento 
+
+La señal `active_position` llega como un número binario de 3 bits (0 a 7), pero para compararla directamente contra `buttons_pulse` (que es un vector de 8 bits, uno por botón), se necesita convertirla a formato **one-hot**. Esto se logra con: `active_mole_onehot = 8'b0000_0001 << active_position`
+Esta operación desplaza un único bit en 1 hacia la izquierda tantas posiciones como indique `active_position`. Por ejemplo, si `active_position = 3`, el resultado es `8'b0000_1000`, es decir, el bit correspondiente al topo #3 queda en 1 y todos los demás en 0.
+
+Una vez obtenida esta representación, el módulo evalúa el resultado de la jugada solo si `turn_active` está activo y `any_press` detectó una pulsación:
+
+- **Acierto (`hit_pulse`)**: ocurre cuando `buttons_pulse` es **exactamente igual** a `active_mole_onehot`, es decir, el jugador presionó el único botón correspondiente a la posición del topo activo.
+- **Fallo (`miss_pulse`)**: ocurre cuando hubo pulsación (`any_press = 1`) pero `buttons_pulse` **no coincide** con `active_mole_onehot`, ya sea porque se presionó un botón incorrecto o porque se presionó más de un botón simultáneamente.
+
+Esta comparación exacta (`==`) es lo que garantiza que solo se considere acierto cuando el botón presionado corresponde precisamente a la posición activa, descartando cualquier otra combinación como fallo.
+
+## Relación con el sistema
+
+Este módulo actúa como el **evaluador de jugadas** dentro del sistema "Whack-a-mole": recibe la posición del topo activo (generada por la lógica de control/secuenciador del juego) y las pulsaciones físicas de los botones (ya sincronizadas/depuradas como pulsos), y produce las señales `hit_pulse` / `miss_pulse` que la lógica de control superior (contador de puntaje, máquina de estados del juego, temporizador de ronda) utiliza para actualizar el marcador, avanzar de ronda o determinar el fin del juego. Al ser puramente combinacional (`always_comb`), no introduce retardo de reloj adicional: su salida depende únicamente del estado actual de sus entradas en cada ciclo.
 
 ### 8.8 `turn_window_timer`
 
-[Inicio, cancelación, conteo y timeout.]
+## Entradas
+
+| Señal | Tipo | Descripción |
+|---|---|---|
+| `clk` | `logic` | Señal de reloj del sistema; el bloque secuencial se actualiza en cada flanco de subida. |
+| `reset` | `logic` | Reset síncrono; al activarse, limpia el contador y desactiva la ventana de turno. |
+| `ce_1ms` | `logic` | Pulso habilitador que ocurre cada 1 ms; actúa como base de tiempo para incrementar el contador. |
+| `start` | `logic` | Señal que inicia una nueva ventana de turno, reiniciando el contador y activando `active`. |
+| `cancel` | `logic` | Señal que cancela la ventana activa antes de que expire (ej. cuando el jugador ya acertó). |
+| `duration_ms` | `logic [10:0]` | Duración total de la ventana de turno, expresada en milisegundos. |
+
+## Salidas
+
+| Señal | Tipo | Descripción |
+|---|---|---|
+| `active` | `logic` | Indica si la ventana de turno está actualmente en curso (contando tiempo). |
+| `timeout_pulse` | `logic` | Pulso de un solo ciclo de reloj que se activa cuando el tiempo de la ventana se agota sin cancelación. |
+
+## Funcionamiento (Conteo de ventana de tiempo y prioridad de cancelación)
+
+El módulo implementa un temporizador descendente basado en un contador ascendente interno (`elapsed_ms`) que se compara contra `duration_ms`. La base de tiempo la da `ce_1ms`, un pulso externo de 1 ms, de modo que `elapsed_ms` solo avanza un conteo por cada milisegundo real transcurrido, y no en cada flanco de `clk`.
+
+La lógica evalúa las condiciones en el siguiente orden de prioridad:
+
+1. **`reset`**: limpia todo el estado (mayor prioridad, síncrono).
+2. **`cancel`**: cierra la ventana (`active = 0`) y reinicia el contador **sin** generar `timeout_pulse`. Esto evita que, si el jugador ya golpeó el topo correcto (evento externo que dispara `cancel`), el temporizador genere un timeout tardío e inválido.
+3. **`start`**: reinicia el contador y activa la ventana, dando inicio a una nueva medición.
+4. **Conteo normal** (`active && ce_1ms`): en cada pulso de 1 ms, se compara `elapsed_ms` contra `duration_ms - 1`. Se usa `duration_ms - 1` porque el conteo empieza en 0, así que al llegar a `duration_ms - 1` ya transcurrieron `duration_ms` milisegundos completos. También se contempla el caso borde `duration_ms <= 1`, generando el timeout inmediatamente en el primer pulso para evitar desbordes o comparaciones inválidas.
+   - Si se cumple la condición de expiración: se reinicia el contador, se desactiva `active` y se emite `timeout_pulse` por un ciclo.
+   - Si no, simplemente se incrementa `elapsed_ms`.
+
+## Relación con el sistema
+
+Este módulo funciona como el **reloj de la ventana de reacción** dentro del sistema "Whack-a-mole": mide cuánto tiempo tiene el jugador para golpear el topo activo antes de que se considere un turno perdido. La señal `start` normalmente la genera la máquina de estados principal al activar un nuevo topo; `cancel` se dispara desde la lógica de evaluación de aciertos (`game_hit_evaluator`) cuando ocurre un `hit_pulse`, evitando un timeout espurio tras un golpe exitoso. La salida `timeout_pulse` alimenta a la máquina de estados de control para registrar el fallo por tiempo agotado y avanzar a la siguiente ronda, mientras que `active` puede usarse para habilitar otras señales (como indicadores visuales) mientras el turno está en curso.
 
 ### 8.9 `difficulty_controller`
 
+## Entradas
+
+| Señal | Tipo | Descripción |
+|---|---|---|
+| `clk` | `logic` | Señal de reloj del sistema; la duración se actualiza en cada flanco de subida. |
+| `reset` | `logic` | Reset síncrono; al activarse, restaura `duration_ms` a `INITIAL_MS` (1500 ms). |
+| `hit_pulse` | `logic` | Pulso de acierto; cada vez que se activa, reduce la duración de la ventana en `STEP_MS`. |
+| `miss_pulse` | `logic` | Pulso de fallo; al activarse, la duración actual se mantiene sin cambios. |
+
+### Parámetros
+
+| Parámetro | Valor por defecto | Descripción |
+|---|---|---|
+| `INITIAL_MS` | 1500 ms | Duración de la ventana antes de cualquier acierto. |
+| `MINIMUM_MS` | 500 ms | Duración mínima a la que puede llegar la ventana (piso de dificultad). |
+| `STEP_MS` | 100 ms | Cantidad en que se reduce la duración por cada acierto acumulado. |
+
+## Salidas
+
+| Señal | Tipo | Descripción |
+|---|---|---|
+| `duration_ms` | `logic [10:0]` | Duración vigente de la ventana de reacción, en milisegundos; se recalcula con cada acierto y se conserva en cada fallo. |
+
+## Funcionamiento (Escalado de dificultad por aciertos)
+
+El módulo ajusta la dificultad del juego reduciendo progresivamente `duration_ms` (la duración de la ventana de reacción) a medida que el jugador acumula aciertos, según la siguiente relación:
+
 | Aciertos que reducen | Duración |
-|---:|---:|
+|---|---|
 | 0 | 1500 ms |
 | 1 | 1400 ms |
 | 2 | 1300 ms |
@@ -486,9 +577,47 @@ Esta separación permite mantener independiente la lógica de control del juego 
 | 9 | 600 ms |
 | 10 o más | 500 ms |
 
+Cada vez que ocurre `hit_pulse`, la duración se reduce en `STEP_MS` (100 ms), siempre que quede por encima de `MINIMUM_MS + STEP_MS`; en caso contrario, se satura directamente en `MINIMUM_MS` (500 ms) para evitar que el resultado de la resta sea menor al piso definido. Esto reproduce exactamente la tabla: después de 10 aciertos consecutivos, la duración llega a su valor mínimo de 500 ms y ya no sigue bajando.
+
+Cuando ocurre `miss_pulse`, la duración **no cambia** — el comentario del código lo indica explícitamente ("la dificultad alcanzada se conserva después de un fallo"), es decir, un fallo no facilita el juego ni retrocede la dificultad ya ganada; solo los aciertos la modifican.
+
+## Relación con el sistema
+
+Este módulo es el **controlador de dificultad adaptativa** del sistema "Whack-a-mole": recibe directamente `hit_pulse` y `miss_pulse` desde `game_hit_evaluator`, y su salida `duration_ms` alimenta a `turn_window_timer` como el parámetro `duration_ms` de cada nueva ventana de turno (vía la señal `start`). De esta forma, cada vez que el jugador acierta, el siguiente topo tendrá una ventana de tiempo más corta, incrementando la dificultad del juego de forma dinámica y acumulativa, mientras que los fallos no alteran el nivel de dificultad ya alcanzado.
+
 ### 8.10 `score_counters`
 
-[Aciertos, fallos acumulados y saturación en 99.]
+## Entradas
+
+| Señal | Tipo | Descripción |
+|---|---|---|
+| `clk` | `logic` | Señal de reloj del sistema; los contadores se actualizan en cada flanco de subida. |
+| `reset` | `logic` | Reset síncrono; al activarse, ambos contadores (`hits` y `misses`) vuelven a 0. |
+| `hit_pulse` | `logic` | Pulso de acierto; cada vez que se activa, incrementa el contador `hits` en 1. |
+| `miss_pulse` | `logic` | Pulso de fallo; cada vez que se activa, incrementa el contador `misses` en 1. |
+
+### Parámetros
+
+| Parámetro | Valor por defecto | Descripción |
+|---|---|---|
+| `MAX_SCORE` | 99 | Valor máximo que puede alcanzar cada contador antes de dejar de incrementarse. |
+
+## Salidas
+
+| Señal | Tipo | Descripción |
+|---|---|---|
+| `hits` | `logic [6:0]` | Cantidad acumulada de aciertos del jugador durante la partida. |
+| `misses` | `logic [6:0]` | Cantidad acumulada de fallos del jugador durante la partida. |
+
+## Funcionamiento (Conteo saturado de aciertos y fallos)
+
+El módulo mantiene dos contadores independientes de 7 bits (`hits` y `misses`), cada uno incrementándose de forma exclusiva según el pulso correspondiente. Ambos contadores pueden incrementarse en el mismo ciclo si, por alguna razón, llegaran a activarse `hit_pulse` y `miss_pulse` simultáneamente, ya que las dos condiciones se evalúan de forma independiente (no son `else if`).
+
+Cada incremento está protegido por una **condición de saturación**: `hits` solo aumenta si `hits < MAX_SCORE`, y `misses` solo aumenta si `misses < MAX_SCORE`. Esto evita el desbordamiento (overflow) del contador de 7 bits una vez alcanzado el valor máximo definido (99 por defecto), dejando el contador fijo en ese tope en lugar de reiniciarse a 0.
+
+## Relación con el sistema
+
+Este módulo actúa como el **marcador de la partida** dentro del sistema "Whack-a-mole": recibe las mismas señales `hit_pulse` y `miss_pulse` generadas por `game_hit_evaluator` (las mismas que también alimentan a `difficulty_controller`), y lleva el conteo total de aciertos y fallos a lo largo del juego. Sus salidas `hits` y `misses` normalmente se envían a un módulo de visualización (display de 7 segmentos, LEDs, etc.) para mostrarle al jugador su desempeño, y también pueden usarse por la lógica de control superior para determinar condiciones de fin de partida (por ejemplo, un número máximo de rondas o de fallos permitidos).
 
 ### 8.11 `consecutive_misses`
  
