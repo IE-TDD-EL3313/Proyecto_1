@@ -703,57 +703,21 @@ Nueva posición   Fin de partida
 
 ---
 
-## 7. Subsistema discreto
+## 7. Subsistema FPGA
 
-### 7.1 LFSR
-
-- Integrados utilizados: [COMPLETAR].
-- Número de bits: [COMPLETAR].
-- Taps: [COMPLETAR].
-- Semilla: [COMPLETAR].
-- Periodo teórico: [COMPLETAR].
-- Periodo medido: [COMPLETAR].
-
-![Esquemático del LFSR](figuras/circuito_lfsr.png)
-
-### 7.2 Decodificador y LEDs
-
-![Circuito del 74LS138](figuras/decoder_74ls138.png)
-
-### 7.3 Entrada de solicitud
-
-```text
-JA4 ── 10 kΩ ── base del 2N2222
-GND ─────────── emisor
-SOLICITUD ───── colector
-5 V ── 10 kΩ ── SOLICITUD
-```
-
-### 7.4 Problemas observados
-
-- Bloqueo en LED0.
-- Bloqueo observado en LED1.
-- Recuperación mediante reset o pulso manual.
-- Solicitudes no reconocidas.
-- [Agregar diagnóstico y solución definitiva.]
-
----
-
-## 8. Subsistema FPGA
-
-### 8.1 `ce_1ms_generator`
+### 7.1 `ce_1ms_generator`
 
 [Función, entradas, salidas, ecuación del divisor y decisiones.]
 
-### 8.2 `sync_2ff`
+### 7.2 `sync_2ff`
 
 [Función, metastabilidad y latencia.]
 
-### 8.3 `button_debouncer`
+### 7.3 `button_debouncer`
 
 [Función y validación temporal.]
 
-### 8.4 `button_bank`
+### 7.4 `button_bank`
 
 El módulo `button_bank` se encarga de acondicionar las señales provenientes de los ocho pulsadores externos utilizados por el jugador.
 
@@ -820,7 +784,7 @@ El uso de este módulo evita que el rebote mecánico o una pulsación prolongada
 
 Además, mantener el acondicionamiento de los botones en un módulo independiente permite separar el manejo de las entradas físicas de la lógica principal del juego.
 
-### 8.5 `parallel_position_receiver`
+### 7.5 `parallel_position_receiver`
 
 El módulo `parallel_position_receiver` se encarga de recibir la posición generada por el subsistema de lógica discreta mediante un bus paralelo de tres bits.
 
@@ -891,7 +855,7 @@ La máquina de estados utiliza `position_valid` para continuar con el inicio de 
 
 Este módulo permite que el enlace paralelo con el circuito discreto sea utilizado de forma más confiable, evitando que cambios transitorios o inestables sean interpretados como posiciones válidas.
 
-### 8.6 `mole_request_generator`
+### 7.6 `mole_request_generator`
 
 El módulo `mole_request_generator` se encarga de generar la señal `solicitud_topo`, utilizada para indicar al subsistema de lógica discreta que debe generar una nueva posición para el siguiente turno del juego.
 
@@ -960,7 +924,7 @@ La secuencia general es:
 
 Esta separación permite mantener independiente la lógica de control del juego de la temporización necesaria para comunicarse con el circuito externo.
 
-### 8.7 `game_hit_evaluator`
+### 7.7 `game_hit_evaluator`
 
 ## Entradas
 
@@ -995,7 +959,7 @@ Esta comparación exacta (`==`) es lo que garantiza que solo se considere aciert
 
 Este módulo actúa como el **evaluador de jugadas** dentro del sistema "Whack-a-mole": recibe la posición del topo activo (generada por la lógica de control/secuenciador del juego) y las pulsaciones físicas de los botones (ya sincronizadas/depuradas como pulsos), y produce las señales `hit_pulse` / `miss_pulse` que la lógica de control superior (contador de puntaje, máquina de estados del juego, temporizador de ronda) utiliza para actualizar el marcador, avanzar de ronda o determinar el fin del juego. Al ser puramente combinacional (`always_comb`), no introduce retardo de reloj adicional: su salida depende únicamente del estado actual de sus entradas en cada ciclo.
 
-### 8.8 `turn_window_timer`
+### 7.8 `turn_window_timer`
 
 ## Entradas
 
@@ -1032,7 +996,7 @@ La lógica evalúa las condiciones en el siguiente orden de prioridad:
 
 Este módulo funciona como el **reloj de la ventana de reacción** dentro del sistema "Whack-a-mole": mide cuánto tiempo tiene el jugador para golpear el topo activo antes de que se considere un turno perdido. La señal `start` normalmente la genera la máquina de estados principal al activar un nuevo topo; `cancel` se dispara desde la lógica de evaluación de aciertos (`game_hit_evaluator`) cuando ocurre un `hit_pulse`, evitando un timeout espurio tras un golpe exitoso. La salida `timeout_pulse` alimenta a la máquina de estados de control para registrar el fallo por tiempo agotado y avanzar a la siguiente ronda, mientras que `active` puede usarse para habilitar otras señales (como indicadores visuales) mientras el turno está en curso.
 
-### 8.9 `difficulty_controller`
+### 7.9 `difficulty_controller`
 
 ## Entradas
 
@@ -1083,7 +1047,7 @@ Cuando ocurre `miss_pulse`, la duración **no cambia** — el comentario del có
 
 Este módulo es el **controlador de dificultad adaptativa** del sistema "Whack-a-mole": recibe directamente `hit_pulse` y `miss_pulse` desde `game_hit_evaluator`, y su salida `duration_ms` alimenta a `turn_window_timer` como el parámetro `duration_ms` de cada nueva ventana de turno (vía la señal `start`). De esta forma, cada vez que el jugador acierta, el siguiente topo tendrá una ventana de tiempo más corta, incrementando la dificultad del juego de forma dinámica y acumulativa, mientras que los fallos no alteran el nivel de dificultad ya alcanzado.
 
-### 8.10 `score_counters`
+### 7.10 `score_counters`
 
 ## Entradas
 
@@ -1117,7 +1081,7 @@ Cada incremento está protegido por una **condición de saturación**: `hits` so
 
 Este módulo actúa como el **marcador de la partida** dentro del sistema "Whack-a-mole": recibe las mismas señales `hit_pulse` y `miss_pulse` generadas por `game_hit_evaluator` (las mismas que también alimentan a `difficulty_controller`), y lleva el conteo total de aciertos y fallos a lo largo del juego. Sus salidas `hits` y `misses` normalmente se envían a un módulo de visualización (display de 7 segmentos, LEDs, etc.) para mostrarle al jugador su desempeño, y también pueden usarse por la lógica de control superior para determinar condiciones de fin de partida (por ejemplo, un número máximo de rondas o de fallos permitidos).
 
-### 8.11 `consecutive_misses`
+### 7.11 `consecutive_misses`
  
 Lleva la cuenta de los fallos consecutivos del jugador, a diferencia del contador de fallos acumulados (8.10), que nunca se reinicia durante la partida. Un acierto (`hit_pulse`) tiene prioridad y reinicia el contador `miss_count` a cero; un fallo (`miss_pulse`) lo incrementa mientras no haya alcanzado 3. El módulo entrega dos salidas distintas: `three_misses`, una señal de nivel combinacional que permanece en alto mientras el contador esté en 3, y `third_miss_pulse`, un pulso registrado de un solo ciclo generado exactamente en el instante en que se completa el tercer fallo. Esta separación es necesaria porque `game_controller_fsm` (8.13) requiere un evento de un ciclo para disparar la transición hacia el estado de game over, evitando ambigüedades que produciría una señal de nivel.
  
@@ -1134,7 +1098,7 @@ Ver [`consecutive_misses.sv`](./consecutive_misses.sv).
  
 ---
  
-### 8.12 `game_over_timer`
+### 7.12 `game_over_timer`
  
 Mide el intervalo de 2000 ms (parámetro `GAME_OVER_MS`) durante el cual el sistema permanece en la pantalla de fin de partida antes de reiniciarse automáticamente. Su estructura reutiliza el mismo principio que `turn_window_timer` (8.8): un contador impulsado por la habilitación temporal `ce_1ms` en lugar de un reloj independiente, con ancho dimensionado automáticamente mediante `$clog2(GAME_OVER_MS)` para que el módulo sea reutilizable ante otros valores del parámetro. Al recibir `start` (proveniente de `game_over_start` en la FSM), el contador arranca y `active` se activa; al cumplirse el tiempo configurado, se genera `done_pulse` durante un ciclo, que la FSM utiliza como `game_over_done` para avanzar hacia el reinicio automático.
  
@@ -1151,7 +1115,7 @@ Ver [`game_over_timer.sv`](./game_over_timer.sv).
  
 ---
 
-### 8.13 `game_controller_fsm`
+### 7.13 `game_controller_fsm`
 
 ![FSM principal](figuras/fsm_principal.png)
  
@@ -1174,18 +1138,18 @@ Desde `ST_PLAY`, un acierto (`hit_pulse`) lleva a `ST_RESOLVE_HIT`, que siempre 
 Ver [`game_controller_fsm.sv`](./game_controller_fsm.sv).
  
 ---
-### 8.14 `seven_segment_controller`
+### 7.14 `seven_segment_controller`
  
 Multiplexa en el tiempo los cuatro dígitos que muestran, de forma simultánea a la vista del usuario, los aciertos y los fallos acumulados (dos dígitos decimales cada uno). Un contador de 2 bits (`scan_index`), incrementado a 1 kHz mediante `ce_1ms`, selecciona cíclicamente el dígito activo; según el dígito, se calcula la unidad o decena correspondiente mediante módulo (`%`) y división entera (`/`) por 10 sobre `hits` o `misses`. El resultado se traduce a los patrones de segmentos mediante una tabla de decodificación activa en bajo, propia del hardware de la Nexys 4 (`seg[0]=A` … `seg[6]=G`). La salida `an[7:0]` se dimensionó según el ancho real del bus de ánodos de los ocho dígitos físicos de la tarjeta, aunque solo se controlan activamente los cuatro primeros; el punto decimal (`dp`) permanece apagado de forma permanente.
  
 Ver [`seven_segment_controller.sv`](./seven_segment_controller.sv).
  
 
-### 8.15 `status_indicator`
+### 7.15 `status_indicator`
 
 [LED fijo durante juego y parpadeante durante game over.]
 
-### 8.16 `whack_a_mole_top`
+### 7.16 `whack_a_mole_top`
 
 El módulo `whack_a_mole_top` corresponde al nivel superior del subsistema implementado en la FPGA. Su función principal es integrar los diferentes módulos desarrollados y establecer las conexiones necesarias para ejecutar la lógica completa del juego.
 
@@ -1312,9 +1276,9 @@ La integración de estas funciones dentro de `whack_a_mole_top` permite mantener
 
 ---
 
-## 9. Asignación de pines
+## 8. Asignación de pines
 
-### 9.1 Posición y solicitud
+### 8.1 Posición y solicitud
 
 | Señal | Conector | Pin FPGA |
 |---|---|---|
@@ -1323,7 +1287,7 @@ La integración de estas funciones dentro de `whack_a_mole_top` permite mantener
 | Q2 | JA3 | D17 |
 | `solicitud_topo` | JA4 | E17 |
 
-### 9.2 Botones
+### 8.2 Botones
 
 | Botón | Conector | Pin FPGA |
 |---:|---|---|
@@ -1340,13 +1304,13 @@ La integración de estas funciones dentro de `whack_a_mole_top` permite mantener
 
 ---
 
-## 10. Verificación por simulación
+## 9. Verificación por simulación
 
-### 10.1 Metodología
+### 9.1 Metodología
 
 [Explicar testbenches autoverificables, estímulos, comparaciones, `PASS`, `$error`, `$fatal` y parámetros reducidos.]
 
-### 10.2 Resultados
+### 9.2 Resultados
 
 | Testbench | Cobertura | Resultado |
 |---|---|---|
@@ -1365,7 +1329,7 @@ La integración de estas funciones dentro de `whack_a_mole_top` permite mantener
 | `tb_status_indicator` | Juego y game over | [ ] |
 | `tb_whack_a_mole_top` | Integración completa | PASS |
 
-### 10.3 Evidencias
+### 9.3 Evidencias
 
 #### Simulación de `button_bank`
 
@@ -1375,7 +1339,7 @@ Las principales señales observadas fueron `buttons_async`, `buttons_level`, `bu
 
 ![Simulación de button_bank](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/button_bank.png)
 
-**Figura X. Simulación del módulo `button_bank`.**
+**Simulación del módulo `button_bank`.**
 
 En la simulación se observa que los cambios rápidos presentes en `buttons_async` no modifican inmediatamente `buttons_level`, demostrando el funcionamiento del filtro de antirrebote. Cuando la entrada permanece estable durante el intervalo requerido, `buttons_level` actualiza su valor y `buttons_pulse` genera un único pulso.
 
@@ -1391,7 +1355,7 @@ Las principales señales observadas fueron `position_async`, `position_sync`, `c
 
 ![Simulación de parallel_position_receiver](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/parallel_position_receiver.png)
 
-**Figura X. Simulación del módulo `parallel_position_receiver`.**
+**Simulación del módulo `parallel_position_receiver`.**
 
 En la simulación se observa que un cambio transitorio en `position_async` es detectado por las etapas internas, pero no se transfiere a la salida `position` al no permanecer estable durante el tiempo requerido.
 
@@ -1408,7 +1372,7 @@ Las señales principales observadas fueron `start`, `solicitud_topo`, `busy`, `d
 ![Simulación de mole_request_generator](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/mole_request_generator.png
 )
 
-**Figura X. Simulación del módulo `mole_request_generator`.**
+**Simulación del módulo `mole_request_generator`.**
 
 La simulación muestra que un pulso en `start` provoca la activación de `solicitud_topo` y `busy`. El contador interno avanza con las habilitaciones de `ce_1ms` hasta completar la duración configurada, momento en el cual la solicitud termina y se genera un pulso en `done`.
 
@@ -1426,7 +1390,7 @@ Entre las señales observadas se encuentran `solicitud_topo`, `position_async`, 
 
 ![Simulación integral de whack_a_mole_top](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/whack_a_mole_top.png)
 
-**Figura X. Simulación integral del módulo `whack_a_mole_top`.**
+**Simulación integral del módulo `whack_a_mole_top`.**
 
 En el primer turno mostrado se recibe la posición 2, por lo que `active_position` toma este valor y `mole_leds` activa el bit correspondiente. Al presionar el botón asociado a la misma posición se genera `hit_pulse` y el contador `hits` aumenta de 0 a 1.
 
@@ -1434,99 +1398,15 @@ Posteriormente se recibe la posición 5, pero se activa un botón diferente al c
 
 La simulación permite comprobar que la solicitud de posición, la recepción del bus paralelo, la evaluación de los botones y la actualización de los contadores funcionan de forma coordinada. El testbench finaliza con `errors = 0`, por lo que la integración evaluada presenta el comportamiento esperado.
 
-## 11. Síntesis e implementación
 
-### 11.1 Utilización de recursos
 
-| Recurso | Utilizado | Disponible | Porcentaje |
-|---|---:|---:|---:|
-| LUT | [ ] | [ ] | [ ] |
-| Flip-flops | [ ] | [ ] | [ ] |
-| I/O | [ ] | [ ] | [ ] |
-| BUFG | [ ] | [ ] | [ ] |
+## 10. Análisis e interpretación de resultados
 
-### 11.2 Análisis temporal
-
-| Parámetro | Resultado |
-|---|---:|
-| Frecuencia objetivo | 100 MHz |
-| Periodo objetivo | 10 ns |
-| Worst Negative Slack | [COMPLETAR] |
-| Timing constraints met | [Sí/No] |
-
-### 11.3 Advertencias
-
-[Documentar warnings y explicar cómo se resolvieron o por qué son aceptables.]
-
-### 11.4 Jerarquía RTL
-
-![Jerarquía RTL](figuras/rtl_hierarchy.png)
-
----
-
-## 12. Implementación experimental
-
-### 12.1 Montaje
-
-![Montaje final](figuras/montaje_final/montaje_general.png)
-
-### 12.2 Procedimiento de prueba
-
-1. Verificar alimentación y tierra común.
-2. Medir `Q0`, `Q1` y `Q2`.
-3. Reiniciar el LFSR.
-4. Programar la FPGA.
-5. Verificar `SOLICITUD_TOPO`.
-6. Probar los ocho botones.
-7. Probar aciertos y fallos.
-8. Probar timeout.
-9. Probar game over.
-
-### 12.3 Mediciones
-
-| Señal | Teórico | Medido | Instrumento | Observación |
-|---|---:|---:|---|---|
-| Alimentación TTL | 5 V | [ ] | Multímetro | [ ] |
-| Alimentación FPGA | 3.3 V | [ ] | Multímetro | [ ] |
-| Q alto antes del divisor | [ ] | [ ] | Multímetro | [ ] |
-| Q alto después del divisor | [ ] | [ ] | Multímetro | [ ] |
-| Solicitud inactiva | 5 V | [ ] | Multímetro | [ ] |
-| Solicitud activa | ~0 V | [ ] | Multímetro | [ ] |
-
-### 12.4 Pruebas funcionales
-
-| Prueba | Esperado | Obtenido | Estado |
-|---|---|---|---|
-| Botón correcto | Incrementa aciertos | [ ] | [ ] |
-| Botón incorrecto | Incrementa fallos | [ ] | [ ] |
-| Timeout | Incrementa fallos | [ ] | [ ] |
-| Acierto tras fallos | Reinicia vidas | [ ] | [ ] |
-| Tres fallos | Game over | [ ] | [ ] |
-| Auto-reset | Puntajes en cero | [ ] | [ ] |
-| Dificultad | Reduce la ventana | [ ] | [ ] |
-| Solicitud | Avanza el LFSR | [ ] | [ ] |
-
----
-
-## 13. Análisis e interpretación de resultados
-
-### 13.1 Comparación teórica, simulada y experimental
-
-| Característica | Teórico | Simulado | Experimental | Diferencia |
-|---|---:|---:|---:|---|
-| `ce_1ms` | 1 ms | [ ] | [ ] | [ ] |
-| Antirrebote | 10 ms | [ ] | [ ] | [ ] |
-| Ventana inicial | 1500 ms | [ ] | [ ] | [ ] |
-| Ventana mínima | 500 ms | [ ] | [ ] | [ ] |
-| Game over | 2000 ms | [ ] | [ ] | [ ] |
-| Solicitud | 500 ms | [ ] | [ ] | [ ] |
-| Separación de solicitudes | 100 ms | [ ] | [ ] | [ ] |
-
-### 13.2 Análisis del LFSR
+### 10.1 Análisis del LFSR
 
 Comparar secuencia teórica y medida, periodo, estados ausentes, bloqueo en `000`, comportamiento de LED1, causa y solución recomendada.
 
-### 13.3 Análisis de comunicación
+### 10.2 Análisis de comunicación
 
 Explicar:
 
@@ -1536,11 +1416,11 @@ Explicar:
 - Ventajas y limitaciones del cambio.
 - Consecuencias sobre la rúbrica.
 
-### 13.4 Análisis de la FPGA
+### 10.3 Análisis de la FPGA
 
 [Analizar simulación, síntesis, timing, clock enable, ausencia de latches y comportamiento físico.]
 
-### 13.5 Problemas y soluciones
+### 10.4 Problemas y soluciones
 
 | Problema | Causa | Diagnóstico | Solución |
 |---|---|---|---|
@@ -1552,40 +1432,8 @@ Explicar:
 
 ---
 
-## 14. Cumplimiento de requisitos
-
-| Requisito | Cumplido | Evidencia | Observación |
-|---|:---:|---|---|
-| LFSR discreto | [ ] | [ ] | [ ] |
-| 74LS138 y ocho LEDs | [ ] | [ ] | [ ] |
-| Solicitud de topo | [ ] | [ ] | [ ] |
-| UART 8N1 | No | Testbench parcial | Sustituido por paralelo |
-| Ocho botones externos | [ ] | [ ] | [ ] |
-| Antirrebote | [ ] | [ ] | [ ] |
-| FSM | [ ] | [ ] | [ ] |
-| Dificultad progresiva | [ ] | [ ] | [ ] |
-| Puntajes 00-99 | [ ] | [ ] | [ ] |
-| Tres fallos consecutivos | [ ] | [ ] | [ ] |
-| Game over de 2 s | [ ] | [ ] | [ ] |
-| Reset manual | [ ] | [ ] | [ ] |
-| Testbenches autoverificables | [ ] | [ ] | [ ] |
-
----
-
-## 15. Conclusiones
+## 11. Conclusiones
 
 [Redactar conclusiones basadas directamente en objetivos y resultados. Incluir funcionamiento modular, verificación, implementación física, limitaciones del LFSR, consecuencias de sustituir UART y mejoras necesarias.]
 
 ---
-
-## 16. Trabajo futuro
-
-- Corregir definitivamente el LFSR.
-- Considerar un LFSR de cuatro bits.
-- Restaurar UART 8N1.
-- Agregar `data_valid` al enlace paralelo.
-- Mejorar adaptación de niveles.
-- Medir solicitudes y relojes con osciloscopio.
-- Ampliar cobertura de pruebas.
-- [ ] Las referencias están completas.
-- [ ] No se utiliza un PDF como entrega oficial.
