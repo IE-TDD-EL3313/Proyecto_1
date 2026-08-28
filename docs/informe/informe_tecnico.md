@@ -565,26 +565,141 @@ La combinación de simulación, control de versiones y medición física permiti
 
 ### 6.1 Diagrama de bloques
 
-![Diagrama general](figuras/diagrama_general.png)
+![Diagrama general de bloques](Imagenes/Diagrama_bloques.jpeg)
 
-[Explicar el diagrama y el flujo de las señales.]
+**Figura 1.** Diagrama de segundo nivel de la arquitectura original del proyecto.
+
+El sistema se divide en dos subsistemas principales: la sección de lógica discreta y la sección implementada en la FPGA. El flujo de control comienza en la FPGA, que genera la señal `SOLICITUD_TOPO` para indicar que se requiere una nueva posición. Esta señal se adapta eléctricamente mediante un transistor 2N2222 antes de ingresar al circuito discreto.
+
+En el subsistema discreto, el bloque de control de solicitud genera el pulso requerido para desplazar el LFSR. El LFSR produce una posición pseudoaleatoria de tres bits, representada por `Q[2:0]`. Esta posición se entrega al decodificador 74LS138, el cual activa una de sus ocho salidas y enciende el LED correspondiente.
+
+El diagrama muestra también la ruta UART propuesta originalmente. En esta arquitectura, la posición debía prepararse como un byte, transmitirse de manera serial y ser recibida por los bloques `Sincronizador UART`, `UART_RX` y `Registro de posición` de la FPGA. Estos módulos fueron desarrollados y verificados mediante simulación; sin embargo, la comunicación UART no funcionó de manera estable durante la integración física.
+
+Por esta razón, en la implementación final la ruta UART fue sustituida por una comunicación paralela directa. Las salidas `Q0`, `Q1` y `Q2` del LFSR se conectaron a tres entradas Pmod de la FPGA mediante adaptación de nivel de 5 V a aproximadamente 3.3 V. Dentro de la FPGA, estas señales pasan por sincronizadores de dos etapas y por un receptor que valida su estabilidad antes de entregar la posición al control del juego.
+
+> **Nota:** el diagrama representa la arquitectura originalmente propuesta con comunicación UART. En la implementación final, los bloques de preparación, transmisión, sincronización y recepción UART fueron reemplazados funcionalmente por el bus paralelo `Q[2:0]` y el módulo `parallel_position_receiver`.
+
+La máquina de estados principal, implementada en `game_controller_fsm`, coordina el desarrollo de la partida. Este bloque recibe la posición validada, los pulsos de los botones, el resultado de la evaluación de cada jugada, la señal de tiempo agotado y la cantidad de fallos consecutivos. A partir de estas entradas controla la solicitud de nuevas posiciones, la apertura de cada turno, la actualización de los contadores y la finalización de la partida.
+
+El temporizador del turno controla el intervalo durante el cual se acepta una respuesta del jugador. Su duración proviene del controlador de dificultad, el cual inicia en 1500 ms, reduce 100 ms después de cada acierto y mantiene un límite mínimo de 500 ms.
+
+Los contadores del juego registran los aciertos y los fallos acumulados. De forma independiente, el bloque de fallos consecutivos determina cuándo se alcanzan tres errores seguidos. Cuando esto sucede, la FSM entra en el estado de finalización de la partida. Los valores de aciertos y fallos se convierten a decimal y se presentan en cuatro dígitos del display de siete segmentos.
+
+El flujo principal de señales puede resumirse de la siguiente forma:
+
+```text
+FPGA: SOLICITUD_TOPO
+          |
+          v
+Adaptación con 2N2222
+          |
+          v
+Control de solicitud -> LFSR -> Q[2:0] -> 74LS138 -> LED del topo
+                                  |
+                                  v
+                      Adaptación de nivel
+                                  |
+                                  v
+                    Receptor paralelo FPGA
+                                  |
+                                  v
+Botones -> Antirrebote -> Evaluador -> FSM principal
+                                      |
+             +------------------------+----------------------+
+             |                        |                      |
+             v                        v                      v
+     Temporizador del turno   Control de dificultad   Contadores
+                                                            |
+                                                            v
+                                                Displays de 7 segmentos
+```
 
 ### 6.2 Flujo de una jugada
 
-1. La FPGA activa `SOLICITUD_TOPO`.
-2. El LFSR genera una posición.
-3. El 74LS138 enciende un LED.
-4. La FPGA recibe `Q[2:0]`.
-5. Se valida la posición.
-6. Se abre la ventana temporal.
-7. Se espera un botón o timeout.
-8. Se registra acierto o fallo.
-9. Se actualizan puntajes, dificultad y vidas.
-10. Se solicita otra posición o se inicia game over.
+El funcionamiento de una jugada se desarrolla mediante la siguiente secuencia:
 
-### 6.3 Diagrama temporal
+1. La máquina de estados determina que se necesita una nueva posición y activa internamente la orden de solicitud.
 
-![Diagrama temporal](figuras/diagrama_temporal.png)
+2. El módulo `mole_request_generator` convierte la orden interna en la señal física `SOLICITUD_TOPO`.
+
+3. La salida de la FPGA controla la base de un transistor 2N2222. El transistor aísla los niveles de 3.3 V y 5 V e invierte la señal antes de entregarla al circuito discreto.
+
+4. El control de solicitud del circuito discreto genera el pulso que hace avanzar el LFSR.
+
+5. El LFSR actualiza su estado de tres bits y produce una nueva posición pseudoaleatoria mediante `Q[2:0]`.
+
+6. El decodificador 74LS138 interpreta la posición y activa una de sus ocho salidas, encendiendo el LED que representa al topo.
+
+7. Simultáneamente, `Q0`, `Q1` y `Q2` ingresan a la FPGA mediante tres entradas Pmod protegidas con adaptación de nivel.
+
+8. El módulo `parallel_position_receiver` sincroniza las entradas con el reloj de 100 MHz y verifica que la posición permanezca estable antes de declararla válida.
+
+9. Una vez recibida la posición válida, la FSM abre la ventana temporal del turno mediante `turn_window_timer`.
+
+10. Durante la ventana activa, el sistema espera que el jugador presione uno de los ocho botones externos. Cada botón pasa primero por sincronización y antirrebote para generar un único pulso limpio.
+
+11. El módulo `game_hit_evaluator` compara el botón presionado con la posición activa:
+
+    - Si el botón corresponde al topo encendido, genera un acierto.
+    - Si corresponde a otra posición, genera un fallo.
+    - Si no se presiona ningún botón antes de finalizar la ventana, el timeout se registra como fallo.
+
+12. Después de resolver la jugada se actualizan los datos del juego:
+
+    - Un acierto incrementa el contador de aciertos.
+    - Un fallo incrementa el contador de fallos acumulados.
+    - Un acierto reinicia el contador de fallos consecutivos.
+    - Un fallo incrementa el contador de fallos consecutivos.
+    - Un acierto reduce en 100 ms la duración del siguiente turno, hasta alcanzar el mínimo de 500 ms.
+
+13. Los contadores actualizados se muestran en cuatro dígitos del display:
+
+    - Dos dígitos para los aciertos.
+    - Dos dígitos para los fallos acumulados.
+
+14. Si todavía no se han alcanzado tres fallos consecutivos, la FSM solicita una nueva posición y comienza otra jugada.
+
+15. Cuando se alcanzan tres fallos consecutivos, la FSM entra en el estado de finalización de la partida. En la implementación final, el sistema permanece en este estado hasta que el usuario activa el reset general.
+
+La secuencia puede representarse de forma resumida como:
+
+```text
+Solicitar posición
+        |
+        v
+Actualizar LFSR y encender topo
+        |
+        v
+Recibir y validar Q[2:0]
+        |
+        v
+Abrir ventana temporal
+        |
+        v
+¿Se presionó un botón?
+     /             \
+   Sí               No
+   |                |
+   v                v
+Comparar         Timeout
+posición            |
+   |                |
+   +-------+--------+
+           |
+           v
+Registrar acierto o fallo
+           |
+           v
+Actualizar puntaje y dificultad
+           |
+           v
+¿Hay 3 fallos consecutivos?
+       /          \
+     No            Sí
+     |              |
+     v              v
+Nueva posición   Fin de partida
+``` 
 
 ---
 
