@@ -853,9 +853,9 @@ La integración de estas funciones dentro de `whack_a_mole_top` permite mantener
 | Testbench | Cobertura | Resultado |
 |---|---|---|
 | `tb_ce_1ms_generator` | Periodo, ancho y reset | [ ] |
-| `tb_button_bank` | Rebote y botones simultáneos | [ ] |
-| `tb_parallel_position_receiver` | Estabilidad y validación | [ ] |
-| `tb_mole_request_generator` | Pulso, `busy` y pendiente | [ ] |
+| `tb_button_bank` | Rebote y botones simultáneos | PASS |
+| `tb_parallel_position_receiver` | Estabilidad y validación | PASS |
+| `tb_mole_request_generator` | Pulso, `busy` y pendiente | PASS |
 | `tb_game_hit_evaluator` | Acierto, fallo y simultaneidad | [ ] |
 | `tb_turn_window_timer` | Inicio, cancelación y timeout | [ ] |
 | `tb_difficulty_controller` | Reducción y saturación | [ ] |
@@ -865,19 +865,76 @@ La integración de estas funciones dentro de `whack_a_mole_top` permite mantener
 | `tb_game_controller_fsm` | Recorrido de estados | [ ] |
 | `tb_seven_segment_controller` | Dígitos y patrones | [ ] |
 | `tb_status_indicator` | Juego y game over | [ ] |
-| `tb_whack_a_mole_top` | Integración completa | [ ] |
+| `tb_whack_a_mole_top` | Integración completa | PASS |
 
 ### 10.3 Evidencias
 
-![Simulación del temporizador](figuras/simulaciones/turn_timer.png)
+#### Simulación de `button_bank`
 
-![Simulación de la FSM](figuras/simulaciones/fsm.png)
+Para verificar el módulo `button_bank` se aplicaron cambios rápidos sobre las entradas de los pulsadores para representar el rebote mecánico, seguidos de pulsaciones que permanecieron estables durante el tiempo requerido por el filtro. También se comprobó el comportamiento ante una pulsación prolongada y ante la activación simultánea de dos botones.
 
-![Simulación integral](figuras/simulaciones/top.png)
+Las principales señales observadas fueron `buttons_async`, `buttons_level`, `buttons_pulse`, `ce_1ms`, `error_count` y `pulse_count`.
 
-Para cada figura explicar estímulo, señales observadas, resultado esperado, resultado obtenido e interpretación.
+![Simulación de button_bank](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/button_bank.png)
+
+**Figura X. Simulación del módulo `button_bank`.**
+
+En la simulación se observa que los cambios rápidos presentes en `buttons_async` no modifican inmediatamente `buttons_level`, demostrando el funcionamiento del filtro de antirrebote. Cuando la entrada permanece estable durante el intervalo requerido, `buttons_level` actualiza su valor y `buttons_pulse` genera un único pulso.
+
+Además, mantener un botón presionado no produce pulsos adicionales y la activación simultánea de dos botones se conserva correctamente. El testbench finaliza con `error_count = 0`, por lo que el comportamiento obtenido coincide con el esperado.
 
 ---
+
+#### Simulación de `parallel_position_receiver`
+
+Para verificar el módulo `parallel_position_receiver` se aplicaron diferentes valores al bus `position_async[2:0]`. Se incluyeron cambios transitorios de corta duración y posiciones que permanecieron estables durante el intervalo requerido.
+
+Las principales señales observadas fueron `position_async`, `position_sync`, `candidate`, `stable_counter`, `position`, `position_valid`, `error_count` y `valid_count`.
+
+![Simulación de parallel_position_receiver](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/parallel_position_receiver.png)
+
+**Figura X. Simulación del módulo `parallel_position_receiver`.**
+
+En la simulación se observa que un cambio transitorio en `position_async` es detectado por las etapas internas, pero no se transfiere a la salida `position` al no permanecer estable durante el tiempo requerido.
+
+Cuando una nueva posición permanece estable, el contador completa el intervalo de validación, `position` adopta el nuevo valor y `position_valid` genera un pulso de un ciclo. Durante la prueba se aceptaron correctamente las posiciones estables y se rechazó la transición temporal. El testbench finaliza con `error_count = 0`.
+
+---
+
+#### Simulación de `mole_request_generator`
+
+Para verificar `mole_request_generator` se generaron pulsos en `start` para solicitar nuevas posiciones. Además, se aplicó una segunda solicitud mientras el módulo se encontraba ocupado, con el objetivo de comprobar el almacenamiento y posterior atención de solicitudes pendientes. También se verificó el comportamiento ante una señal de reset durante una solicitud activa.
+
+Las señales principales observadas fueron `start`, `solicitud_topo`, `busy`, `done`, `pending_request`, `pulse_counter`, `ce_1ms` y `error_count`.
+
+![Simulación de mole_request_generator](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/mole_request_generator.png
+)
+
+**Figura X. Simulación del módulo `mole_request_generator`.**
+
+La simulación muestra que un pulso en `start` provoca la activación de `solicitud_topo` y `busy`. El contador interno avanza con las habilitaciones de `ce_1ms` hasta completar la duración configurada, momento en el cual la solicitud termina y se genera un pulso en `done`.
+
+También se observa que, si aparece un nuevo `start` mientras `busy` se encuentra activo, `pending_request` almacena la nueva petición. Al finalizar la primera solicitud, la petición pendiente se procesa posteriormente sin perderse.
+
+Finalmente, el reset aplicado durante una solicitud fuerza `solicitud_topo` y `busy` a su estado inactivo. El testbench concluye con `error_count = 0`, confirmando el funcionamiento esperado.
+
+---
+
+#### Simulación integral de `whack_a_mole_top`
+
+La simulación de `whack_a_mole_top` se utilizó para verificar la interacción entre los principales módulos del sistema. Se simularon solicitudes de nuevas posiciones, respuestas provenientes del circuito discreto y pulsaciones correctas e incorrectas realizadas por el jugador.
+
+Entre las señales observadas se encuentran `solicitud_topo`, `position_async`, `position_valid`, `active_position`, `mole_leds`, `buttons_async`, `buttons_pulse`, `turn_active`, `hit_pulse`, `button_miss_pulse`, `effective_miss_pulse`, `hits`, `misses` y `consecutive_miss_count`.
+
+![Simulación integral de whack_a_mole_top](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/whack_a_mole_top.png)
+
+**Figura X. Simulación integral del módulo `whack_a_mole_top`.**
+
+En el primer turno mostrado se recibe la posición 2, por lo que `active_position` toma este valor y `mole_leds` activa el bit correspondiente. Al presionar el botón asociado a la misma posición se genera `hit_pulse` y el contador `hits` aumenta de 0 a 1.
+
+Posteriormente se recibe la posición 5, pero se activa un botón diferente al correspondiente. Como resultado, se genera `button_miss_pulse` y también `effective_miss_pulse`. Esto provoca que `misses` aumente de 0 a 1 y que `consecutive_miss_count` registre el fallo consecutivo.
+
+La simulación permite comprobar que la solicitud de posición, la recepción del bus paralelo, la evaluación de los botones y la actualización de los contadores funcionan de forma coordinada. El testbench finaliza con `errors = 0`, por lo que la integración evaluada presenta el comportamiento esperado.
 
 ## 11. Síntesis e implementación
 
