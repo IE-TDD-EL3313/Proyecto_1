@@ -341,7 +341,7 @@ Durante la prueba se transmitieron los siguientes bytes:
 | `0x07` | `111` | 7 | Correcto |
 | `0x00` | `000` | 0 | Correcto |
 
-![Simulación integrada del receptor UART](figuras/uart_integrado.png)
+![Simulación integrada del receptor UART](Imagenes/uart_integrado.png)
 
 En la forma de onda se observa que `serial_async` contiene las tramas generadas por el testbench. La señal `serial_sync` reproduce la entrada después de atravesar el sincronizador de dos etapas.
 
