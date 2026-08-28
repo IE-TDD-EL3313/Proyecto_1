@@ -1773,6 +1773,45 @@ Posteriormente se recibe la posición 5, pero se activa un botón diferente al c
 
 La simulación permite comprobar que la solicitud de posición, la recepción del bus paralelo, la evaluación de los botones y la actualización de los contadores funcionan de forma coordinada. El testbench finaliza con `errors = 0`, por lo que la integración evaluada presenta el comportamiento esperado.
 
+#### Simulación de `game_hit_evaluator`
+
+**Consola:** el testbench recorrió las 8 posiciones posibles del topo activo, probando en cada una tanto el caso de acierto (presionar el botón correcto) como el de fallo (presionar uno incorrecto), confirmando que `hit_pulse` y `miss_pulse` se activan correctamente en cada situación. Además se verificaron tres casos borde importantes: que no ocurra nada si no hay pulsación durante el turno, que una pulsación correcta fuera de la ventana de tiempo (`turn_active = 0`) sea ignorada por el módulo, y que presionar dos botones simultáneamente se interprete como fallo (ya que `buttons_pulse` deja de coincidir exactamente con el valor one-hot esperado). Todas las verificaciones dieron **PASS**, cerrando con el mensaje de finalización sin errores.
+
+![Simulación game_hit_evaluator 1](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/tb_gamehit_1.jpeg)
+
+**Waveform:** se observa el barrido de `active_position` de 0 a 7, con `active_mole_onehot` reflejando correctamente la conversión one-hot mediante el desplazamiento (`<<`) en cada posición. Por cada valor de posición aparece primero un pulso de `hit_pulse` (cuando `buttons_pulse` coincide exactamente con el one-hot esperado) y luego uno de `miss_pulse` (cuando se prueba un botón distinto), lo que coincide con el patrón visto en la consola. Cerca de los 15 ns se ve un pequeño hueco en la señal `turn_active`, correspondiente al caso de prueba de pulsación correcta fuera de turno: ahí se presiona el botón correcto pero, al estar `turn_active` en 0, ni `hit_pulse` ni `miss_pulse` se activan, demostrando que el módulo respeta la ventana de tiempo. Las señales `position_index`, `expected_mole_onehot` y `wrong_button` son internas del testbench y sirven para generar los estímulos y comparar contra el resultado esperado. `error_count` permanece en 0 durante toda la simulación, confirmando que ninguna comparación falló.
+
+![Simulación game_hit_evaluator 2](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/tb_gamehit_2.jpeg)
+
+#### Simulación de `turn_window_timer`
+
+**Consola:** se validó en primer lugar que `reset` cierra la ventana (`active = 0`) y que `start` la abre correctamente, iniciando el conteo. Se comprobó que `active` se mantiene en alto mientras transcurren los pulsos de `ce_1ms` sin llegar aún a `duration_ms`, y luego que ocurre un timeout exacto al llegar a 5 ms, verificando además que ese `timeout_pulse` dura exactamente un ciclo de reloj y no se queda activado. También se probó que `cancel` cierra la ventana inmediatamente **sin** generar `timeout_pulse`, y que una ventana ya cancelada no produce un timeout tardío aunque sigan llegando pulsos de `ce_1ms`. Por último se verificó que el temporizador puede reiniciarse con una duración distinta (3 ms) generando el timeout en el momento correcto, y el caso borde de duración mínima (1 ms), donde el timeout debe ocurrir en el primer pulso sin esperar un ciclo adicional. Todas las pruebas resultaron en **PASS**, sin errores.
+
+![Simulación turn_window_timer 1](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/tb_windowtimer_1.jpeg)
+
+**Waveform:** la señal `duration_ms` cambia entre tres valores a lo largo de la simulación (`005`, `003` y `001`), cada uno correspondiente a un escenario de prueba distinto. Cada vez que se activa `start`, `active` sube a 1 inmediatamente y permanece así mientras transcurre el conteo, hasta que ocurre el timeout (visible como un pulso corto en `timeout_pulse`, alineado con el momento en que `active` vuelve a 0) o hasta que se activa `cancel`. Se observa con claridad que, alrededor de los 200 ns, al activarse `cancel`, `active` baja a 0 de inmediato sin que aparezca ningún pulso en `timeout_pulse`, confirmando visualmente la prioridad de la cancelación sobre la lógica de expiración normal descrita en el código. La señal `error_count` se mantiene en 0 durante toda la simulación, indicando que ninguna verificación falló.
+
+![Simulación turn_window_timer 2](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/tb_windowtimer_2.jpeg)
+
+#### Simulación de `difficulty_controller`
+
+**Consola:** se verificó primero que, tras `reset`, la duración inicial corresponde a 1500 ms. Luego se probó, acierto por acierto, que cada `hit_pulse` reduce `duration_ms` exactamente en 100 ms, siguiendo la tabla completa de diseño (1400, 1300, 1200, 1100, 1000, 900, 800, 700 y 600 ms para los aciertos 1 a 9, y 500 ms en el acierto 10). Se confirmó también que aciertos adicionales más allá del décimo no hacen bajar la duración por debajo del mínimo definido, es decir, que la saturación funciona correctamente. Adicionalmente se comprobó que un `miss_pulse` no modifica la duración actual (conservando la dificultad ya alcanzada), y que un nuevo `reset` restaura la duración a su valor inicial de 1500 ms sin importar cuánto se hubiera reducido previamente. Todas las verificaciones resultaron en **PASS**, replicando exactamente la tabla de diseño proporcionada.
+
+![Simulación difficulty_controller 1](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/tb_difficutycontroller_1.jpeg)
+
+**Waveform:** la señal `duration_ms` desciende en formato hexadecimal siguiendo fielmente la tabla de diseño (`5dc` = 1500 → `578` = 1400 → `514` = 1300 → `4b0` = 1200 → `44c` = 1100 → `3e8` = 1000 → `384` = 900 → `320` = 800 → `2bc` = 700 → `258` = 600 → `1f4` = 500), y cada transición está alineada exactamente con un pulso de `hit_pulse`. Hacia el final de la simulación aparece un pulso de `miss_pulse`, y se observa que `duration_ms` no cambia en absoluto tras ese pulso, quedando fijo en `1f4` (500), lo cual confirma en la forma de onda que los fallos no afectan la dificultad ya ganada. Las señales `hit_index` y `expected_duration` son internas del testbench: llevan el número de acierto que se está probando y el valor de duración esperado para compararlo contra el valor real generado por el módulo. La señal `error_count` permanece en 0 durante toda la simulación, confirmando que ninguna comparación falló.
+
+![Simulación difficulty_controller 2](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/tb_difficutycontroller_2.jpeg)
+
+#### Simulación de `score_counters`
+
+**Consola:** se confirmó primero que `reset` limpia ambos contadores (`hits` y `misses`) a 0, y que ambos cuentan de forma completamente independiente entre sí, es decir, que un `hit_pulse` no afecta a `misses` y viceversa. Luego se verificó que ambos contadores saturan correctamente al llegar al valor máximo definido (99), dejando de incrementarse aunque sigan llegando más pulsos del tipo correspondiente, evitando así un desbordamiento del contador de 7 bits. Finalmente se comprobó que, incluso después de que ambos contadores quedaran saturados en 99, un nuevo `reset` los limpia correctamente de vuelta a 0. Todas las pruebas resultaron en **PASS**, cerrando con el mensaje de finalización sin errores, y el resumen de la herramienta de simulación (XSim) confirma que la ejecución corrió sin fallas durante los 1000 ns de tiempo simulado.
+
+![Simulación score_counters 1](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/tb_scorecounter_1.jpeg)
+
+**Waveform:** al inicio de la simulación se aplica una ráfaga de `miss_pulse` (desde 0 hasta aproximadamente 2 µs), durante la cual `misses` sube progresivamente hasta saturarse en `63` (equivalente a 99 en decimal), mientras que `hits` permanece fijo en `00`, evidenciando visualmente que ambos contadores son independientes. Después, a partir de aproximadamente 2 µs, se aplica una ráfaga de `hit_pulse`, donde `hits` sube pasando por valores intermedios como `02` hasta saturarse también en `63` hacia el final de la simulación, sin que esto afecte en absoluto al valor ya saturado de `misses`. La señal `pulse_index` es interna del testbench y lleva el conteo total de pulsos generados a lo largo de la prueba (llegando a `0000006a`, es decir 106 en decimal). La señal `error_count` se mantiene en 0 durante toda la simulación, confirmando que ninguna comparación falló.
+
+![Simulación score_counters 2](https://github.com/IE-TDD-EL3313/Proyecto_1/blob/main/docs/informe/Imagenes/tb_scorecounter_2.jpeg)
 
 
 ## 10. Análisis e interpretación de resultados
